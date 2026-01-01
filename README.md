@@ -1,6 +1,6 @@
 # RAM Eater Ultimate v3.1
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-18-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky)
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-18-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky)[![App](https://img.shields.io/badge/demo-online-green?logo=vercel&logoColor=white)](https://ram-eater-ultimate.vercel.app/)
 
 **RAM Eater Ultimate** is a sophisticated browser-based stress testing tool designed to visualize memory allocation behavior, garbage collection, and CPU load handling within a modern web browser environment. 
 
