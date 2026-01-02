@@ -242,6 +242,7 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
     return (
         <div className="relative w-full h-full group/canvas">
             <canvas ref={canvasRef} className="w-full h-full object-cover opacity-80 cursor-pointer" onDoubleClick={onClick}/>
+            {/* Show FPS if active (animated) */}
             {active && !isPopup && (
                 <div className="absolute top-2 right-2 z-10 bg-black/70 text-green-400 text-[10px] font-mono font-bold px-2 py-1 rounded backdrop-blur-md border border-green-500/30 pointer-events-none select-none">
                     {fps} FPS {overdrive > 1 ? `(x${overdrive})` : ''}
@@ -333,6 +334,7 @@ export default function App() {
   // CPU Bench
   const [cpuBenchScore, setCpuBenchScore] = useState(0);
   const [cpuBenchStage, setCpuBenchStage] = useState(0);
+  const cpuBenchScoreRef = useRef(0);
   const [cpuHighScore, setCpuHighScore] = useState(0);
 
   // GPU Bench
@@ -341,8 +343,9 @@ export default function App() {
   const [gpuBenchResults, setGpuBenchResults] = useState([]);
   const [gpuBenchTimeLeft, setGpuBenchTimeLeft] = useState(0);
   const [gpuBenchCurrentFps, setGpuBenchCurrentFps] = useState(0);
-  const [gpuBenchAvgBuffer, setGpuBenchAvgBuffer] = useState([]);
-  const [gpuHighScore, setGpuHighScore] = useState(0);
+  const gpuBenchAvgBufferRef = useRef([]); 
+  const [gpuBenchAvgBuffer, setGpuBenchAvgBuffer] = useState([]); 
+  const [gpuHighScores, setGpuHighScores] = useState({ LIGHT: 0, NORMAL: 0, BURNER: 0 });
   const [showBenchResults, setShowBenchResults] = useState(false);
   
   const gpuBenchInterval = useRef(null);
@@ -361,9 +364,16 @@ export default function App() {
   // Init High Scores
   useEffect(() => {
       const cpu = localStorage.getItem('ramEater_cpuHighScore');
-      const gpu = localStorage.getItem('ramEater_gpuHighScore');
+      const l = localStorage.getItem('ramEater_gpuScore_LIGHT');
+      const n = localStorage.getItem('ramEater_gpuScore_NORMAL');
+      const b = localStorage.getItem('ramEater_gpuScore_BURNER');
+      
       if(cpu) setCpuHighScore(Number(cpu));
-      if(gpu) setGpuHighScore(Number(gpu));
+      setGpuHighScores({
+          LIGHT: Number(l || 0),
+          NORMAL: Number(n || 0),
+          BURNER: Number(b || 0)
+      });
   }, []);
 
   // Force Storage UI update loop
@@ -457,16 +467,13 @@ export default function App() {
       setGpuBenchResults([]);
       setShowGpuPopup(true);
       setGpuActive(true);
-      setupGpuStage(mode, 0);
+      setupGpuStage(mode, 0, []);
   };
 
-  const setupGpuStage = (mode, stageIdx) => {
-      let suite = NORMAL_SUITE;
-      if (mode === 'LIGHT') suite = LIGHT_SUITE;
-      if (mode === 'BURNER') suite = BURNER_SUITE;
-
+  const setupGpuStage = (mode, stageIdx, currentResults) => {
+      const suite = mode === 'LIGHT' ? LIGHT_SUITE : (mode === 'NORMAL' ? NORMAL_SUITE : BURNER_SUITE);
       if (stageIdx >= suite.length) {
-          finishGpuBenchmark();
+          finishGpuBenchmark(currentResults, mode);
           return;
       }
       
@@ -477,6 +484,7 @@ export default function App() {
       setGpuIntensity(100); 
       setGpuBenchTimeLeft(20); 
       setGpuBenchAvgBuffer([]); 
+      gpuBenchAvgBufferRef.current = []; // Reset ref
       
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
       
@@ -484,7 +492,7 @@ export default function App() {
           setGpuBenchTimeLeft(prev => {
               if (prev <= 1) {
                   clearInterval(gpuBenchInterval.current);
-                  recordGpuResult(mode, stageIdx);
+                  recordGpuResult(mode, stageIdx, currentResults);
                   return 0;
               }
               return prev - 1;
@@ -492,46 +500,45 @@ export default function App() {
       }, 1000);
   };
 
-  const recordGpuResult = (mode, stageIdx) => {
-      let suite = NORMAL_SUITE;
-      if (mode === 'LIGHT') suite = LIGHT_SUITE;
-      if (mode === 'BURNER') suite = BURNER_SUITE;
-      
+  const recordGpuResult = (mode, stageIdx, currentResults) => {
+      const suite = mode === 'LIGHT' ? LIGHT_SUITE : (mode === 'NORMAL' ? NORMAL_SUITE : BURNER_SUITE);
       const config = suite[stageIdx];
-      const validSamples = gpuBenchAvgBuffer.slice(8); 
+      // Skip first 2 seconds (warmup)
+      const validSamples = gpuBenchAvgBufferRef.current.slice(8); 
       const avg = validSamples.length > 0 
           ? validSamples.reduce((a,b) => a+b, 0) / validSamples.length 
           : gpuBenchCurrentFps; 
 
-      setGpuBenchResults(prev => [...prev, { ...config, avgFps: avg }]);
+      const newResult = { ...config, avgFps: avg };
+      const newResults = [...currentResults, newResult];
+      setGpuBenchResults(newResults);
       setGpuBenchStage(stageIdx + 1);
-      setupGpuStage(mode, stageIdx + 1);
+      setupGpuStage(mode, stageIdx + 1, newResults);
   };
 
   const handleGpuFpsUpdate = (fps) => {
       setGpuBenchCurrentFps(fps);
       if (gpuBenchMode !== 'NONE') {
+          // Update both state (for UI) and Ref (for reliable calculation)
           setGpuBenchAvgBuffer(prev => [...prev, fps]);
+          gpuBenchAvgBufferRef.current.push(fps);
       }
   };
 
-  const finishGpuBenchmark = () => {
-      const totalScore = gpuBenchResults.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res/1024) * r.od), 0);
-      const modeName = gpuBenchMode;
+  const finishGpuBenchmark = (results, modeName) => {
+      const totalScore = results.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res/1024) * r.od), 0);
       setGpuBenchMode('NONE');
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
       
-      if(totalScore > gpuHighScore) {
-          setGpuHighScore(totalScore);
-          localStorage.setItem('ramEater_gpuHighScore', totalScore);
-      }
+      const key = `ramEater_gpuScore_${modeName}`;
+      const currentHigh = Number(localStorage.getItem(key) || 0);
       
-      // Pass the mode name to results so we can display "LIGHT BENCHMARK RESULTS" etc.
-      // Using a small hack via state or just local var for log
-      // Here I will rely on the user seeing the log, or update showBenchResults to include mode
-      // For now, standard results are fine, adding mode to title below
+      if(totalScore > currentHigh) {
+          localStorage.setItem(key, totalScore);
+          setGpuHighScores(prev => ({ ...prev, [modeName]: totalScore }));
+      }
       
       setShowBenchResults(modeName); 
       addLog(`${modeName} GPU Benchmark Complete. Score: ${totalScore}`);
@@ -552,6 +559,7 @@ export default function App() {
       setIsBenchmarking(true);
       setActiveTab('RAM');
       setCpuBenchScore(0);
+      cpuBenchScoreRef.current = 0;
       
       let stage = 0;
       const stages = [
@@ -561,11 +569,13 @@ export default function App() {
       
       const runStage = () => {
           if (stage >= stages.length) {
-              const finalScore = cpuBenchScore + 5000;
-              if (finalScore > cpuHighScore) {
+              const finalScore = cpuBenchScoreRef.current + 5000;
+              const currentHigh = Number(localStorage.getItem('ramEater_cpuHighScore') || 0);
+              if (finalScore > currentHigh) {
                   setCpuHighScore(finalScore);
                   localStorage.setItem('ramEater_cpuHighScore', finalScore);
               }
+              addLog(`CPU Benchmark Complete. Score: ${finalScore}`, 'success');
               stopCpuBenchmark();
               return;
           }
@@ -578,7 +588,9 @@ export default function App() {
           let timeLeft = current.time;
           benchmarkInterval.current = setInterval(() => {
               timeLeft--;
-              setCpuBenchScore(s => s + Math.floor((current.ram / 100) + current.cpu));
+              const pts = Math.floor((current.ram / 100) + current.cpu);
+              cpuBenchScoreRef.current += pts;
+              setCpuBenchScore(cpuBenchScoreRef.current);
               if (timeLeft <= 0) {
                   clearInterval(benchmarkInterval.current);
                   stage++;
@@ -739,7 +751,7 @@ export default function App() {
                   {activeTab === 'STORAGE' && <SimpleChart data={chartDataStorage} max={Math.max(2000, storageUsed * 1.2)} color="#f59e0b" label="Disk Usage" unit="MB" />}
                   {activeTab === 'GPU' && (
                       <div className="w-full h-full bg-black rounded overflow-hidden relative group">
-                          {/* Main Chart Canvas: Active when running OR just visual preview when idle. */}
+                          {/* Main Chart Canvas: Show only if running, otherwise show "IDLE" text */}
                           {gpuActive ? (
                             <GpuCanvas 
                               active={!showGpuPopup} 
@@ -794,7 +806,7 @@ export default function App() {
                       </div>
                   )}
 
-                  {/* FPS Counter in Popup */}
+                  {/* FPS Counter in Popup (Positioned left of close button) */}
                   <div className="absolute top-4 right-20 z-20 bg-black/70 text-green-400 text-xs font-mono font-bold px-3 py-1.5 rounded backdrop-blur-md border border-green-500/30">
                       FPS: {gpuBenchTimeLeft > 18 && gpuBenchMode !== 'NONE' ? 'WARMING UP...' : gpuBenchCurrentFps}
                   </div>
@@ -808,7 +820,7 @@ export default function App() {
 
                   <div className="flex-1 relative">
                       <GpuCanvas 
-                        active={true} 
+                        active={true} // Always render in popup
                         intensity={gpuIntensity} 
                         resolution={gpuResolution} 
                         mode={gpuMode} 
@@ -832,12 +844,21 @@ export default function App() {
                       <div className="text-xs text-slate-500 uppercase mt-1">Total Score</div>
                   </div>
                   <div className="max-h-[300px] overflow-y-auto space-y-1 mb-4 pr-2 scrollbar-thin scrollbar-thumb-slate-700">
-                      {gpuBenchResults.map((r, i) => (
-                          <div key={i} className="flex justify-between bg-slate-800 p-2 rounded text-xs">
-                              <span className="text-slate-400">{r.mode} {r.res}px x{r.od}</span>
-                              <span className="text-white font-mono">{r.avgFps.toFixed(0)} FPS</span>
-                          </div>
-                      ))}
+                      {gpuBenchResults.map((r, i) => {
+                          const score = Math.round(r.avgFps * (r.res/1024) * r.od);
+                          return (
+                              <div key={i} className="flex justify-between items-center bg-slate-800 p-2 rounded text-xs">
+                                  <div className="flex flex-col">
+                                      <span className="text-slate-300 font-bold">{r.mode}</span>
+                                      <span className="text-slate-500 text-[10px]">{r.res}px • x{r.od} OD</span>
+                                  </div>
+                                  <div className="text-right">
+                                      <div className="text-indigo-400 font-bold">{score} pts</div>
+                                      <div className="text-white font-mono text-[10px] opacity-70">{r.avgFps.toFixed(0)} FPS</div>
+                                  </div>
+                              </div>
+                          );
+                      })}
                   </div>
                   <button onClick={() => setShowBenchResults(false)} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-lg">CLOSE</button>
               </div>
@@ -956,9 +977,19 @@ export default function App() {
                    </>
                ) : (
                    <>
-                        <div className="text-center mt-2">
-                           <div className="text-[10px] text-slate-500">GPU High Score</div>
-                           <div className="text-2xl font-black text-rose-400">{gpuHighScore}</div>
+                        <div className="mt-2 flex flex-col gap-3 px-2">
+                           <div className="flex justify-between items-center border-b border-teal-500/20 pb-1">
+                               <span className="text-xs font-bold text-teal-400 uppercase">Light</span>
+                               <span className="text-xl font-black text-white font-mono">{gpuHighScores.LIGHT}</span>
+                           </div>
+                           <div className="flex justify-between items-center border-b border-indigo-500/20 pb-1">
+                               <span className="text-xs font-bold text-indigo-400 uppercase">Normal</span>
+                               <span className="text-xl font-black text-white font-mono">{gpuHighScores.NORMAL}</span>
+                           </div>
+                           <div className="flex justify-between items-center border-b border-rose-500/20 pb-1">
+                               <span className="text-xs font-bold text-rose-400 uppercase">Burner</span>
+                               <span className="text-xl font-black text-white font-mono">{gpuHighScores.BURNER}</span>
+                           </div>
                        </div>
                        <div className="mt-auto flex flex-col gap-1">
                            <button onClick={() => runGpuBenchmark('LIGHT')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-teal-600 hover:bg-teal-500 text-white font-bold py-1.5 rounded text-xs disabled:opacity-50">
