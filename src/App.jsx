@@ -228,8 +228,7 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
                 const passes = overdrive || 1;
                 for(let i=0; i<passes; i++) { gl.drawArrays(gl.TRIANGLES, 0, 6); }
                 frameId = requestAnimationFrame(render);
-            } 
-            // NOTE: Removed clearing else block -> preserves last frame
+            }
         };
 
         if (active) render(0);
@@ -243,7 +242,6 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
     return (
         <div className="relative w-full h-full group/canvas">
             <canvas ref={canvasRef} className="w-full h-full object-cover opacity-80 cursor-pointer" onDoubleClick={onClick}/>
-            {/* Show FPS if active (animated) */}
             {active && !isPopup && (
                 <div className="absolute top-2 right-2 z-10 bg-black/70 text-green-400 text-[10px] font-mono font-bold px-2 py-1 rounded backdrop-blur-md border border-green-500/30 pointer-events-none select-none">
                     {fps} FPS {overdrive > 1 ? `(x${overdrive})` : ''}
@@ -272,7 +270,13 @@ const SimpleChart = ({ data, color, max, label, unit }) => {
 };
 
 // --- SUITES ---
-const LIGHT_SUITE = [
+const LIGHT_SUITE = [ // For iGPU / Safe
+    { mode: 'FRACTAL', res: 1024, od: 1 }, { mode: 'FRACTAL', res: 1024, od: 2 }, { mode: 'FRACTAL', res: 2048, od: 1 },
+    { mode: '3D', res: 1024, od: 1 }, { mode: '3D', res: 1024, od: 2 }, { mode: '3D', res: 2048, od: 1 },
+    { mode: 'FIRE', res: 1024, od: 1 }, { mode: 'FIRE', res: 1024, od: 2 }, { mode: 'FIRE', res: 2048, od: 1 },
+];
+
+const NORMAL_SUITE = [ // Standard
     { mode: 'FRACTAL', res: 1024, od: 1 }, { mode: 'FRACTAL', res: 2048, od: 1 }, { mode: 'FRACTAL', res: 4096, od: 1 },
     { mode: 'FRACTAL', res: 1024, od: 5 }, { mode: 'FRACTAL', res: 2048, od: 5 }, { mode: 'FRACTAL', res: 4096, od: 5 },
     { mode: '3D', res: 1024, od: 1 }, { mode: '3D', res: 2048, od: 1 }, { mode: '3D', res: 4096, od: 1 },
@@ -281,7 +285,7 @@ const LIGHT_SUITE = [
     { mode: 'FIRE', res: 1024, od: 5 }, { mode: 'FIRE', res: 2048, od: 5 }, { mode: 'FIRE', res: 4096, od: 5 },
 ];
 
-const BURNER_SUITE = [
+const BURNER_SUITE = [ // Extreme
     { mode: 'FRACTAL', res: 4096, od: 1 }, { mode: 'FRACTAL', res: 4096, od: 5 }, { mode: 'FRACTAL', res: 4096, od: 10 }, { mode: 'FRACTAL', res: 4096, od: 15 },
     { mode: 'FRACTAL', res: 8192, od: 1 }, { mode: 'FRACTAL', res: 8192, od: 5 }, { mode: 'FRACTAL', res: 8192, od: 10 }, { mode: 'FRACTAL', res: 8192, od: 15 },
     { mode: '3D', res: 4096, od: 1 }, { mode: '3D', res: 4096, od: 5 }, { mode: '3D', res: 4096, od: 10 }, { mode: '3D', res: 4096, od: 15 },
@@ -306,7 +310,6 @@ export default function App() {
   const isFillingStorageRef = useRef(false);
   const dbRef = useRef(null);
   
-  // Storage UI force update
   const [forceUpdateStorage, setForceUpdateStorage] = useState(0);
   
   const [gpuActive, setGpuActive] = useState(false);
@@ -392,21 +395,18 @@ export default function App() {
     
     addLog("NETWORK STORM: Starting Download Burner & Flood...");
 
-    // Speedometer Loop
     let lastBytes = 0;
     netInterval.current = setInterval(() => {
         const currentBytes = netBytesRef.current;
         const diff = currentBytes - lastBytes;
-        const mbps = (diff * 8) / (1024 * 1024); // bits per sec / 1M
+        const mbps = (diff * 8) / (1024 * 1024); 
         lastBytes = currentBytes;
         setNetStats(prev => ({ speed: mbps, total: currentBytes / (1024 * 1024) }));
     }, 1000);
 
-    // 1. Download Burner (5 parallel streams)
     const downloadWorker = async () => {
         while (!netAbortController.current.signal.aborted) {
             try {
-                // Using a large file from a CDN (OVH speedtest) with random query to bypass cache
                 const response = await fetch(`https://proof.ovh.net/files/100Mb.dat?r=${Math.random()}`, {
                     signal: netAbortController.current.signal,
                     cache: 'no-store'
@@ -415,34 +415,28 @@ export default function App() {
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    netBytesRef.current += value.length; // Count bytes
-                    // value is discarded immediately (garbage collected)
+                    netBytesRef.current += value.length; 
                 }
             } catch (e) {
                 if (e.name !== 'AbortError') console.warn("DL Fail (CORS/Net):", e);
-                await new Promise(r => setTimeout(r, 100)); // Retry delay
+                await new Promise(r => setTimeout(r, 100)); 
             }
         }
     };
 
-    // 2. Flood/Upload Simulation (Header Spam)
     const floodWorker = async () => {
         while (!netAbortController.current.signal.aborted) {
             try {
-                // Fetching small assets rapidly
                 await fetch(`https://www.google.com/generate_204?r=${Math.random()}`, {
                     method: 'HEAD',
                     mode: 'no-cors',
                     signal: netAbortController.current.signal
                 });
-                netBytesRef.current += 500; // Approx overhead
-            } catch (e) {
-               // Ignore CORS opaque errors
-            }
+                netBytesRef.current += 500; 
+            } catch (e) {}
         }
     };
 
-    // Start 5 DL threads and 5 Flood threads
     for (let i = 0; i < 5; i++) downloadWorker();
     for (let i = 0; i < 5; i++) floodWorker();
   };
@@ -453,7 +447,6 @@ export default function App() {
       setNetActive(false);
       addLog(`Network Stress Stopped. Burned: ${netStats.total.toFixed(0)} MB`);
   };
-
 
   // --- GPU BENCHMARK ---
   const runGpuBenchmark = (mode) => {
@@ -468,7 +461,10 @@ export default function App() {
   };
 
   const setupGpuStage = (mode, stageIdx) => {
-      const suite = mode === 'LIGHT' ? LIGHT_SUITE : BURNER_SUITE;
+      let suite = NORMAL_SUITE;
+      if (mode === 'LIGHT') suite = LIGHT_SUITE;
+      if (mode === 'BURNER') suite = BURNER_SUITE;
+
       if (stageIdx >= suite.length) {
           finishGpuBenchmark();
           return;
@@ -497,9 +493,11 @@ export default function App() {
   };
 
   const recordGpuResult = (mode, stageIdx) => {
-      const suite = mode === 'LIGHT' ? LIGHT_SUITE : BURNER_SUITE;
+      let suite = NORMAL_SUITE;
+      if (mode === 'LIGHT') suite = LIGHT_SUITE;
+      if (mode === 'BURNER') suite = BURNER_SUITE;
+      
       const config = suite[stageIdx];
-      // Skip first 2 seconds (warmup)
       const validSamples = gpuBenchAvgBuffer.slice(8); 
       const avg = validSamples.length > 0 
           ? validSamples.reduce((a,b) => a+b, 0) / validSamples.length 
@@ -519,6 +517,7 @@ export default function App() {
 
   const finishGpuBenchmark = () => {
       const totalScore = gpuBenchResults.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res/1024) * r.od), 0);
+      const modeName = gpuBenchMode;
       setGpuBenchMode('NONE');
       setShowGpuPopup(false);
       setGpuActive(false);
@@ -529,8 +528,13 @@ export default function App() {
           localStorage.setItem('ramEater_gpuHighScore', totalScore);
       }
       
-      setShowBenchResults(true);
-      addLog(`GPU Benchmark Complete. Score: ${totalScore}`);
+      // Pass the mode name to results so we can display "LIGHT BENCHMARK RESULTS" etc.
+      // Using a small hack via state or just local var for log
+      // Here I will rely on the user seeing the log, or update showBenchResults to include mode
+      // For now, standard results are fine, adding mode to title below
+      
+      setShowBenchResults(modeName); 
+      addLog(`${modeName} GPU Benchmark Complete. Score: ${totalScore}`);
   };
 
   const cancelGpuBenchmark = () => {
@@ -688,7 +692,7 @@ export default function App() {
   const clearAll = () => {
       stopRAM();
       clearStorage();
-      stopNetworkStress(); // Stop Net
+      stopNetworkStress(); 
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -735,7 +739,7 @@ export default function App() {
                   {activeTab === 'STORAGE' && <SimpleChart data={chartDataStorage} max={Math.max(2000, storageUsed * 1.2)} color="#f59e0b" label="Disk Usage" unit="MB" />}
                   {activeTab === 'GPU' && (
                       <div className="w-full h-full bg-black rounded overflow-hidden relative group">
-                          {/* Main Chart Canvas: Show only if running, otherwise show "IDLE" text */}
+                          {/* Main Chart Canvas: Active when running OR just visual preview when idle. */}
                           {gpuActive ? (
                             <GpuCanvas 
                               active={!showGpuPopup} 
@@ -775,7 +779,7 @@ export default function App() {
                               <div>Scene: {gpuMode}</div>
                               <div>Res: {gpuResolution}px</div>
                               <div>Overdrive: <span className="text-red-400">x{gpuOverdrive}</span></div>
-                              <div className="text-indigo-400">Stage {gpuBenchStage + 1}/{gpuBenchMode === 'LIGHT' ? LIGHT_SUITE.length : BURNER_SUITE.length}</div>
+                              <div className="text-indigo-400">Stage {gpuBenchStage + 1}/{gpuBenchMode === 'LIGHT' ? LIGHT_SUITE.length : (gpuBenchMode === 'NORMAL' ? NORMAL_SUITE.length : BURNER_SUITE.length)}</div>
                           </div>
                           <div className="mt-3 bg-white/5 rounded-lg p-2 flex justify-between items-end">
                               <div>
@@ -790,7 +794,7 @@ export default function App() {
                       </div>
                   )}
 
-                  {/* FPS Counter in Popup (Positioned left of close button) */}
+                  {/* FPS Counter in Popup */}
                   <div className="absolute top-4 right-20 z-20 bg-black/70 text-green-400 text-xs font-mono font-bold px-3 py-1.5 rounded backdrop-blur-md border border-green-500/30">
                       FPS: {gpuBenchTimeLeft > 18 && gpuBenchMode !== 'NONE' ? 'WARMING UP...' : gpuBenchCurrentFps}
                   </div>
@@ -804,7 +808,7 @@ export default function App() {
 
                   <div className="flex-1 relative">
                       <GpuCanvas 
-                        active={true} // Always render in popup
+                        active={true} 
                         intensity={gpuIntensity} 
                         resolution={gpuResolution} 
                         mode={gpuMode} 
@@ -821,7 +825,7 @@ export default function App() {
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4">
               <div className="bg-slate-900 border border-indigo-500 rounded-2xl max-w-lg w-full p-6">
                   <div className="text-center mb-4">
-                      <h2 className="text-2xl font-black text-white">BENCHMARK RESULTS</h2>
+                      <h2 className="text-2xl font-black text-white">{showBenchResults} RESULTS</h2>
                       <div className="text-4xl text-indigo-400 font-bold mt-2">
                           {gpuBenchResults.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res/1024) * r.od), 0).toLocaleString()}
                       </div>
@@ -956,12 +960,15 @@ export default function App() {
                            <div className="text-[10px] text-slate-500">GPU High Score</div>
                            <div className="text-2xl font-black text-rose-400">{gpuHighScore}</div>
                        </div>
-                       <div className="mt-auto flex flex-col gap-2">
-                           <button onClick={() => runGpuBenchmark('LIGHT')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded text-xs disabled:opacity-50">
-                               LIGHT BENCH
+                       <div className="mt-auto flex flex-col gap-1">
+                           <button onClick={() => runGpuBenchmark('LIGHT')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-teal-600 hover:bg-teal-500 text-white font-bold py-1.5 rounded text-xs disabled:opacity-50">
+                               LIGHT
                            </button>
-                           <button onClick={() => runGpuBenchmark('BURNER')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 rounded text-xs disabled:opacity-50">
-                               BURNER BENCH
+                           <button onClick={() => runGpuBenchmark('NORMAL')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1.5 rounded text-xs disabled:opacity-50">
+                               NORMAL
+                           </button>
+                           <button onClick={() => runGpuBenchmark('BURNER')} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="bg-rose-600 hover:bg-rose-500 text-white font-bold py-1.5 rounded text-xs disabled:opacity-50">
+                               BURNER
                            </button>
                        </div>
                    </>
