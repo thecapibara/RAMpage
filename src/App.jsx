@@ -1047,7 +1047,7 @@ export default function App() {
                        <span className="text-indigo-400">RAM</span>PAGE!
                      </h1>
                      <div className="text-[10px] text-slate-500 uppercase tracking-widest font-mono mt-1">
-                        v4.0 • Full Stress Suite • <span className="text-indigo-400 font-bold">JustGL & Gemini</span>
+                        v4.2 • Full Stress Suite • <span className="text-indigo-400 font-bold">JustGL & Gemini</span>
                      </div>
                  </div>
              </div>
