@@ -1027,12 +1027,17 @@ export default function App() {
 
           {/* COL 4: BENCHMARKS */}
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col gap-4 relative overflow-hidden">
+
+              <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase border-b border-slate-800 pb-2">
+                  <Icons.Trophy size={14} /> Benchmarks
+               </div>
+            
                {/* Mode Switcher */}
                <div className="flex bg-slate-950 rounded p-1">
                    <button onClick={() => setBenchType('CPU')} className={`flex-1 py-1 text-[10px] font-bold rounded ${benchType==='CPU' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>CPU/RAM</button>
                    <button onClick={() => setBenchType('GPU')} className={`flex-1 py-1 text-[10px] font-bold rounded ${benchType==='GPU' ? 'bg-rose-600 text-white' : 'text-slate-500'}`}>GPU</button>
                </div>
-
+            
                {benchType === 'CPU' ? (
                    <>
                        <div className="text-center mt-2">
