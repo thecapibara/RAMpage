@@ -1,4 +1,4 @@
-# RAMpage! [ex-RAM Eater Ultimate] v4.0
+# RAMpage! [ex-RAM Eater Ultimate] v4.2
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-18-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky) [![App](https://img.shields.io/badge/demo-online-green?logo=vercel&logoColor=white)](https://ram-eater.vercel.app/)
 
@@ -20,6 +20,8 @@ This software is developed strictly for **educational purposes** and for **stres
 
 * **🧠 High-Volume RAM Allocation:** Push memory usage to the limit (up to ~16GB) using multi-threaded Web Workers to test Garbage Collection and OOM behavior.
 * **🔥 CPU Stress Test:** Integrated CPU burner with adjustable intensity (0-100%) that runs complex math operations on separate threads.
+* **👾 Minions Mode:** Bypasses browser memory limits by spawning a coordinated "botnet" of popup windows. Easily consume 32GB+ RAM.
+* **⛏️ Hash Stress & Chaos:** The hash stress test (ALU stress) that can be combined with "Chaos" allocation to break V8 garbage collection.
 * **🎮 GPU Stress & Burner:** Advanced WebGL renderer featuring:
     * **3 Modes:** Fractal, 3D Raymarching, and Particle Fire.
     * **Resolution Scaling:** Render up to 8K resolution.
