@@ -784,12 +784,12 @@ export default function App() {
     
     setGpuBenchResults(newResults);
 
-    // Переходимо далі через 2 секунди
+    // Переходимо далі через 4 секунди
     setTimeout(() => {
          const nextStage = gpuBenchStage + 1;
          setGpuBenchStage(nextStage);
          setupGpuStage(gpuBenchMode, nextStage, newResults);
-    }, 2000);
+    }, 4000);
 }, [gpuBenchMode, gpuBenchStage, gpuBenchResults]);
 
   return (
