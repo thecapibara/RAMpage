@@ -414,41 +414,36 @@ export default function App() {
         setNetStats(prev => ({ speed: mbps, total: currentBytes / (1024 * 1024) }));
     }, 1000);
 
-    const downloadWorker = async () => {
+    // Optimized High-Speed Downloader
+    const downloadWorker = async (id) => {
+        const targetUrl = 'https://speed.cloudflare.com/__down?bytes=52428800'; // 50MB
         while (!netAbortController.current.signal.aborted) {
             try {
-                const response = await fetch(`https://proof.ovh.net/files/100Mb.dat?r=${Math.random()}`, {
+                const response = await fetch(`${targetUrl}&r=${Math.random()}`, {
                     signal: netAbortController.current.signal,
-                    cache: 'no-store'
+                    cache: 'no-store',
+                    mode: 'cors'
                 });
+                
+                if (!response.ok) throw new Error(response.statusText);
+
                 const reader = response.body.getReader();
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    netBytesRef.current += value.length; 
+                    if (value) {
+                        netBytesRef.current += value.length;
+                    }
                 }
             } catch (e) {
-                if (e.name !== 'AbortError') console.warn("DL Fail (CORS/Net):", e);
-                await new Promise(r => setTimeout(r, 100)); 
+                if (netAbortController.current.signal.aborted) break;
+                // Silent retry for speed
             }
         }
     };
 
-    const floodWorker = async () => {
-        while (!netAbortController.current.signal.aborted) {
-            try {
-                await fetch(`https://www.google.com/generate_204?r=${Math.random()}`, {
-                    method: 'HEAD',
-                    mode: 'no-cors',
-                    signal: netAbortController.current.signal
-                });
-                netBytesRef.current += 500; 
-            } catch (e) {}
-        }
-    };
-
-    for (let i = 0; i < 5; i++) downloadWorker();
-    for (let i = 0; i < 5; i++) floodWorker();
+    // Spawn 12 concurrent workers
+    for (let i = 0; i < 12; i++) downloadWorker(i);
   };
 
   const stopNetworkStress = () => {
