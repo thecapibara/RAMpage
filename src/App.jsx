@@ -246,6 +246,7 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
             if (contextLost || (gl && gl.isContextLost())) {
                 cancelAnimationFrame(frameId);
                 return;
+            }
 
             frameCount++;
             const now = performance.now();
