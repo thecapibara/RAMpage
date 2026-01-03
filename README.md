@@ -20,7 +20,7 @@ This software is developed strictly for **educational purposes** and for **stres
 
 * **🧠 High-Volume RAM Allocation:** Push memory usage to the limit (up to ~16GB) using multi-threaded Web Workers to test Garbage Collection and OOM behavior.
 * **🔥 CPU Stress Test:** Integrated CPU burner with adjustable intensity (0-100%) that runs complex math operations on separate threads.
-* **👾 Minions Mode:** Bypasses browser memory limits by spawning a coordinated "botnet" of popup windows. Easily consume 32GB+ RAM.
+* **👾 Minions Mode:** Bypasses browser memory limits by spawning a coordinated popup windows. Easily consume 32GB+ RAM.
 * **⛏️ Hash Stress & Chaos:** The hash stress test (ALU stress) that can be combined with "Chaos" allocation to break V8 garbage collection.
 * **🎮 GPU Stress & Burner:** Advanced WebGL renderer featuring:
     * **3 Modes:** Fractal, 3D Raymarching, and Particle Fire.
