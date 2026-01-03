@@ -156,16 +156,42 @@ const WORKER_CODE = `
 `;
 
 // --- GpuCanvas ---
-const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, overdrive, onFpsUpdate }) => {
+const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, overdrive, onFpsUpdate, onError }) => {
     const canvasRef = useRef(null);
     const [fps, setFps] = useState(0);
+    const [contextLost, setContextLost] = useState(false);
 
     useEffect(() => {
         const canvas = canvasRef.current;
         if(!canvas) return;
+
+        // 1. Обробники подій втрати/відновлення контексту
+        const handleContextLost = (e) => {
+            e.preventDefault(); // Це обов'язково, щоб мати шанс на відновлення
+            console.warn("WebGL Context Lost! GPU crashed.");
+            setContextLost(true);
+            if (onFpsUpdate) onFpsUpdate(0);
+            
+            // Повідомляємо батьківський компонент (для бенчмарку), що стався краш
+            if (onError) onError();
+        };
+
+        const handleContextRestored = () => {
+            console.log("WebGL Context Restored.");
+            setContextLost(false);
+        };
+
+        canvas.addEventListener('webglcontextlost', handleContextLost, false);
+        canvas.addEventListener('webglcontextrestored', handleContextRestored, false);
+
+        // Якщо контекст втрачено, не намагаємося ініціалізувати WebGL
+        if (contextLost) return;
+
         canvas.width = resolution; 
         canvas.height = resolution;
-        const gl = canvas.getContext('webgl');
+        
+        // powerPreference: "high-performance" просить систему використати дискретну відеокарту
+        const gl = canvas.getContext('webgl', { powerPreference: "high-performance" });
         if(!gl) return;
 
         const createShader = (gl, type, src) => {
@@ -182,7 +208,12 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
         
         const vs = createShader(gl, gl.VERTEX_SHADER, VERT_SHADER);
         const fsO = createShader(gl, gl.FRAGMENT_SHADER, fs);
-        if (!vs || !fsO) return;
+        
+        // Додаткова перевірка, бо після крашу шейдери можуть не створитись
+        if (!vs || !fsO) {
+            if(gl && !gl.isContextLost()) gl.deleteProgram(prog);
+            return;
+        }
 
         gl.attachShader(prog, vs); gl.attachShader(prog, fsO);
         gl.linkProgram(prog); gl.useProgram(prog);
@@ -199,17 +230,22 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
         const intL = gl.getUniformLocation(prog, "u_intensity");
 
         // Initial Draw (Static Preview)
-        gl.viewport(0, 0, canvas.width, canvas.height);
-        gl.uniform2f(resL, canvas.width, canvas.height);
-        gl.uniform1f(timeL, 10.0);
-        gl.uniform1f(intL, intensity / 100);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (!gl.isContextLost()) {
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.uniform2f(resL, canvas.width, canvas.height);
+            gl.uniform1f(timeL, 10.0);
+            gl.uniform1f(intL, intensity / 100);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
 
         let frameId;
         let frameCount = 0;
         let lastTime = performance.now();
 
         const render = (time) => {
+            // Критична перевірка всередині лупу
+            if (gl.isContextLost()) return; 
+
             frameCount++;
             const now = performance.now();
             if (now - lastTime >= 250) { 
@@ -231,19 +267,41 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
             }
         };
 
-        if (active) render(0);
+        if (active && !contextLost) render(0);
 
         return () => {
             cancelAnimationFrame(frameId);
-            if(gl && prog) { gl.deleteProgram(prog); gl.deleteShader(vs); gl.deleteShader(fsO); }
+            canvas.removeEventListener('webglcontextlost', handleContextLost);
+            canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+            if(gl && !gl.isContextLost() && prog) { 
+                gl.deleteProgram(prog); gl.deleteShader(vs); gl.deleteShader(fsO); 
+            }
         };
-    }, [active, intensity, resolution, mode, overdrive, onFpsUpdate]);
+    }, [active, intensity, resolution, mode, overdrive, onFpsUpdate, contextLost, onError]);
 
     return (
         <div className="relative w-full h-full group/canvas">
+            {/* UI для Крашу */}
+            {contextLost && (
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 text-center p-4 backdrop-blur-sm animate-in fade-in duration-300">
+                    <Icons.ShieldAlert size={48} className="text-red-500 mb-2 animate-pulse"/>
+                    <h3 className="text-xl font-bold text-red-500 font-graffiti tracking-widest">GPU CRASHED!</h3>
+                    <p className="text-xs text-slate-300 mb-4 font-mono">Browser killed WebGL context.<br/>Limits exceeded.</p>
+                    {!isPopup && (
+                        <button 
+                            onClick={() => setContextLost(false)} 
+                            className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded text-xs transition-colors"
+                        >
+                            TRY RECOVER
+                        </button>
+                    )}
+                </div>
+            )}
+
             <canvas ref={canvasRef} className="w-full h-full object-cover opacity-80 cursor-pointer" onDoubleClick={onClick}/>
-            {/* Show FPS if active (animated) */}
-            {active && !isPopup && (
+            
+            {/* FPS Counter */}
+            {active && !isPopup && !contextLost && (
                 <div className="absolute top-2 right-2 z-10 bg-black/70 text-green-400 text-[10px] font-mono font-bold px-2 py-1 rounded backdrop-blur-md border border-green-500/30 pointer-events-none select-none">
                     {fps} FPS {overdrive > 1 ? `(x${overdrive})` : ''}
                 </div>
@@ -710,6 +768,27 @@ export default function App() {
       cancelGpuBenchmark();
   };
 
+  const handleGpuCrash = useCallback(() => {
+    if (gpuBenchMode === 'NONE') return;
+    
+    if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+
+    const suite = gpuBenchMode === 'LIGHT' ? LIGHT_SUITE : (gpuBenchMode === 'NORMAL' ? NORMAL_SUITE : BURNER_SUITE);
+    const currentConfig = suite[gpuBenchStage];
+    
+    const newResult = { ...currentConfig, avgFps: 0, crashed: true }; 
+    const newResults = [...gpuBenchResults, newResult];
+    
+    setGpuBenchResults(newResults);
+
+    // Переходимо далі через 2 секунди
+    setTimeout(() => {
+         const nextStage = gpuBenchStage + 1;
+         setGpuBenchStage(nextStage);
+         setupGpuStage(gpuBenchMode, nextStage, newResults);
+    }, 2000);
+}, [gpuBenchMode, gpuBenchStage, gpuBenchResults]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-mono flex flex-col gap-4 overflow-hidden">
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');.font-graffiti { font-family: 'Permanent Marker', cursive; text-shadow: 2px 2px 0px #4f46e5;}`}</style>
@@ -754,7 +833,8 @@ export default function App() {
                               resolution={gpuResolution} 
                               mode={gpuMode} 
                               overdrive={gpuOverdrive}
-                              onClick={() => setShowGpuPopup(true)} 
+                              onClick={() => setShowGpuPopup(true)}
+                              onError={handleGpuCrash}
                             />
                           ) : (
                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
