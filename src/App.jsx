@@ -243,8 +243,9 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
         let lastTime = performance.now();
 
         const render = (time) => {
-            // Критична перевірка всередині лупу
-            if (gl.isContextLost()) return; 
+            if (contextLost || (gl && gl.isContextLost())) {
+                cancelAnimationFrame(frameId);
+                return;
 
             frameCount++;
             const now = performance.now();
@@ -287,14 +288,14 @@ const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, over
                     <Icons.ShieldAlert size={48} className="text-red-500 mb-2 animate-pulse"/>
                     <h3 className="text-xl font-bold text-red-500 font-graffiti tracking-widest">GPU CRASHED!</h3>
                     <p className="text-xs text-slate-300 mb-4 font-mono">Browser killed WebGL context.<br/>Limits exceeded.</p>
-                    {!isPopup && (
-                        <button 
-                            onClick={() => setContextLost(false)} 
-                            className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded text-xs transition-colors"
-                        >
-                            TRY RECOVER
-                        </button>
-                    )}
+                    {isPopup && (
+                       <button 
+                          onClick={() => window.location.reload()} 
+                          className="mt-4 border border-red-500 text-red-500 hover:bg-red-500 hover:text-white font-bold py-2 px-6 rounded text-xs transition-colors"
+                      >
+                          FORCE RELOAD PAGE
+                      </button>
+                  )}
                 </div>
             )}
 
@@ -532,6 +533,7 @@ export default function App() {
       
       const config = suite[stageIdx];
       setGpuMode(config.mode);
+      setGpuBenchCurrentFps(0);
       setGpuResolution(config.res);
       setGpuOverdrive(config.od);
       setGpuIntensity(100); 
@@ -888,14 +890,15 @@ export default function App() {
 
                   <button 
                     onClick={() => gpuBenchMode !== 'NONE' ? cancelGpuBenchmark() : setShowGpuPopup(false)}
-                    className="absolute top-4 right-4 bg-slate-800/80 hover:bg-red-600 text-white p-2 rounded-full backdrop-blur-md transition-all z-20 border border-white/10"
+                    className="absolute top-4 right-4 bg-slate-800/80 hover:bg-red-600 text-white p-2 rounded-full backdrop-blur-md transition-all z-50 border border-white/10"
                   >
                       <Icons.X size={20} />
                   </button>
 
                   <div className="flex-1 relative">
                       <GpuCanvas 
-                        active={true} // Always render in popup
+                        active={true}
+                        key={gpuBenchStage}
                         intensity={gpuIntensity} 
                         resolution={gpuResolution} 
                         mode={gpuMode} 
