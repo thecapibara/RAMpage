@@ -121,39 +121,153 @@ const VERT_SHADER = `precision mediump float; attribute vec2 position; void main
 const WORKER_CODE = `
   let memoryStore = [];
   let cpuIntensity = 0;
+  let stressMode = 'STANDARD'; 
+  let allocMode = 'LINEAR';
+  let isRunning = true; 
+
+  const heavyHash = (str) => {
+      let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+      for (let i = 0; i < str.length; i++) {
+          h1 = Math.imul(h1 ^ str.charCodeAt(i), 2654435761);
+          h2 = Math.imul(h2 ^ str.charCodeAt(i), 1597334677);
+          h1 = ((h1 << 13) | (h1 >>> 19)) ^ h2;
+          h2 = ((h2 << 16) | (h2 >>> 16)) ^ h1;
+      }
+      return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+  };
+
   const burnCpuChunk = (intensity) => {
     if (intensity <= 0) return;
     const msToBurn = (intensity / 100) * 80; 
     const start = performance.now();
-    while (performance.now() - start < msToBurn) { Math.sqrt(Math.random() * Math.random()); }
+    
+    if (stressMode === 'HASH') {
+        let hashes = 0;
+        while (performance.now() - start < msToBurn) { 
+            heavyHash("block_" + Math.random() + "_" + hashes++);
+        }
+        if (Math.random() > 0.8) {
+            self.postMessage({ type: 'HASH', hash: "0000" + Math.random().toString(16).slice(2) });
+        }
+    } else {
+        while (performance.now() - start < msToBurn) { Math.sqrt(Math.random() * Math.random()); }
+    }
   };
+
   self.onmessage = async (e) => {
-    const { action, targetMB, id, type, cpuLoad } = e.data;
+    const { action, targetMB, id, type, cpuLoad, mode, ramMode } = e.data;
+    
     if (action === 'ALLOCATE') {
       cpuIntensity = cpuLoad || 0;
-      const CHUNK_SIZE = 10; const BYTES_PER_MB = 1024 * 1024;
+      stressMode = mode || 'STANDARD';
+      allocMode = ramMode || 'LINEAR';
+      isRunning = true;
+
+      const CHUNK_SIZE = 10; 
+      const BYTES_PER_MB = 1024 * 1024;
       const steps = Math.ceil(targetMB / CHUNK_SIZE);
+      
       try {
         for (let i = 0; i < steps; i++) {
-          if (type === 'STRING') {
-             const strLength = (CHUNK_SIZE * BYTES_PER_MB) / 2; const chunk = "X".repeat(strLength); memoryStore.push(chunk);
+          if (!isRunning) break; 
+
+          // --- LOGIC FOR MEMORY ---
+          if (allocMode === 'CHAOS') {
+             const chaosType = Math.random();
+             if (chaosType < 0.33) { memoryStore.push(new Float64Array((CHUNK_SIZE * BYTES_PER_MB) / 8).fill(Math.random())); } 
+             else if (chaosType < 0.66) { memoryStore.push("X".repeat((CHUNK_SIZE * BYTES_PER_MB)/2)); } 
+             else { memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1)); }
           } else {
-             const chunkBytes = CHUNK_SIZE * BYTES_PER_MB; const buffer = new Uint8Array(chunkBytes);
-             for (let j = 0; j < chunkBytes; j += 4096) buffer[j] = (Math.random() * 255) | 0;
-             buffer[chunkBytes - 1] = 1; memoryStore.push(buffer);
+              memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1));
           }
+
           if (cpuIntensity > 0) burnCpuChunk(cpuIntensity);
+          
           self.postMessage({ type: 'PROGRESS', addedMB: CHUNK_SIZE, id });
           await new Promise(r => setTimeout(r, 20)); 
         }
-        self.postMessage({ type: 'DONE', id });
-      } catch (err) { self.postMessage({ type: 'ERROR', error: err.message, id }); }
-    } else if (action === 'CLEAR') {
-      memoryStore = []; try { new Array(10000).fill(0); } catch(e){}
-      self.postMessage({ type: 'CLEARED', id });
+
+        if (stressMode === 'HASH' && isRunning) {
+            self.postMessage({ type: 'HASH_LOOP_ENTER', id }); 
+            while (isRunning) {
+                if (cpuIntensity > 0) burnCpuChunk(cpuIntensity);
+                await new Promise(r => setTimeout(r, 20)); 
+            }
+        } else {
+            self.postMessage({ type: 'DONE', id });
+        }
+
+      } catch (err) { 
+          self.postMessage({ type: 'ERROR', error: err.message, id });
+      }
+
+    } else if (action === 'STOP' || action === 'CLEAR') { 
+      isRunning = false;
+      memoryStore = []; 
+      try { if(globalThis.gc) globalThis.gc(); } catch(e){} 
+      if(action === 'CLEAR') self.postMessage({ type: 'CLEARED', id });
     }
   };
 `;
+
+// --- NETWORK WORKER (Background Traffic) ---
+const NETWORK_WORKER_CODE = `
+  let isRunning = false;
+  let totalBytes = 0;
+  
+  const runDownloader = async (id) => {
+    const targetUrl = 'https://speed.cloudflare.com/__down?bytes=52428800'; // 50MB Chunks
+    
+    while (isRunning) {
+      try {
+        const response = await fetch(\`\${targetUrl}&r=\${Math.random()}\`, {
+             cache: 'no-store',
+             mode: 'cors'
+        });
+        const reader = response.body.getReader();
+        while (isRunning) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) totalBytes += value.length;
+        }
+      } catch (e) {
+        await new Promise(r => setTimeout(r, 100));
+      }
+    }
+  };
+
+  const runFlooder = async () => {
+     while (isRunning) {
+         try {
+             await fetch(\`https://www.google.com/generate_204?r=\${Math.random()}\`, { 
+                 mode: 'no-cors', 
+                 cache: 'no-store' 
+             });
+             totalBytes += 500; 
+         } catch(e) { await new Promise(r => setTimeout(r, 50)); }
+     }
+  };
+
+  self.onmessage = (e) => {
+    if (e.data === 'START') {
+      isRunning = true;
+      totalBytes = 0;
+      
+      for(let i=0; i<6; i++) runDownloader(i);
+      // Запускаємо 4 флудери (для кількості з'єднань)
+      for(let i=0; i<4; i++) runFlooder();
+
+      setInterval(() => {
+          if (isRunning) self.postMessage({ total: totalBytes });
+      }, 200);
+
+    } else if (e.data === 'STOP') {
+      isRunning = false;
+    }
+  };
+`;
+
+
 
 // --- GpuCanvas ---
 const GpuCanvas = ({ active, intensity, resolution, onClick, mode, isPopup, overdrive, onFpsUpdate, onError }) => {
@@ -356,6 +470,8 @@ const BURNER_SUITE = [ // Extreme
 ];
 
 export default function App() {
+  const [cpuMode, setCpuMode] = useState('STANDARD');
+  const [ramMode, setRamMode] = useState('LINEAR');
   const [activeTab, setActiveTab] = useState('RAM'); 
   const [targetMB, setTargetMB] = useState(4096);
   const [cpuLoad, setCpuLoad] = useState(0); 
@@ -382,7 +498,8 @@ export default function App() {
 
   // Network Stress State
   const [netActive, setNetActive] = useState(false);
-  const [netStats, setNetStats] = useState({ speed: 0, total: 0 }); // speed: Mbps, total: MB
+  const [netStats, setNetStats] = useState({ speed: 0, total: 0 }); 
+  const networkWorkerRef = useRef(null);
   const netAbortController = useRef(null);
   const netBytesRef = useRef(0);
   const netInterval = useRef(null);
@@ -460,56 +577,46 @@ export default function App() {
     if (netActive) return;
     setNetActive(true);
     setNetStats({ speed: 0, total: 0 });
-    netBytesRef.current = 0;
-    netAbortController.current = new AbortController();
-    
-    addLog("NETWORK STORM: Starting Download Burner & Flood...");
+    addLog("NETWORK STORM: Initializing Background Worker...");
+
+    const blob = new Blob([NETWORK_WORKER_CODE], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+    networkWorkerRef.current = worker;
 
     let lastBytes = 0;
-    netInterval.current = setInterval(() => {
-        const currentBytes = netBytesRef.current;
-        const diff = currentBytes - lastBytes;
-        const mbps = (diff * 8) / (1024 * 1024); 
-        lastBytes = currentBytes;
-        setNetStats(prev => ({ speed: mbps, total: currentBytes / (1024 * 1024) }));
-    }, 1000);
+    let lastTime = performance.now();
 
-    // Optimized High-Speed Downloader
-    const downloadWorker = async (id) => {
-        const targetUrl = 'https://speed.cloudflare.com/__down?bytes=52428800'; // 50MB
-        while (!netAbortController.current.signal.aborted) {
-            try {
-                const response = await fetch(`${targetUrl}&r=${Math.random()}`, {
-                    signal: netAbortController.current.signal,
-                    cache: 'no-store',
-                    mode: 'cors'
-                });
-                
-                if (!response.ok) throw new Error(response.statusText);
+    worker.onmessage = (e) => {
+        const currentBytes = e.data.total;
+        const now = performance.now();
+        const timeDiff = (now - lastTime) / 1000; // у секундах
 
-                const reader = response.body.getReader();
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    if (value) {
-                        netBytesRef.current += value.length;
-                    }
-                }
-            } catch (e) {
-                if (netAbortController.current.signal.aborted) break;
-                // Silent retry for speed
-            }
+        if (timeDiff > 0.5) { 
+            const bytesDiff = currentBytes - lastBytes;
+            const mbps = (bytesDiff * 8) / (1024 * 1024) / timeDiff;
+            
+            setNetStats({ 
+                speed: mbps, 
+                total: currentBytes / (1024 * 1024) 
+            });
+
+            lastBytes = currentBytes;
+            lastTime = now;
+        } else if (lastBytes === 0) {
+             setNetStats(prev => ({ ...prev, total: currentBytes / (1024 * 1024) }));
         }
     };
 
-    // Spawn 12 concurrent workers
-    for (let i = 0; i < 12; i++) downloadWorker(i);
+    worker.postMessage('START');
   };
 
   const stopNetworkStress = () => {
-      if (netAbortController.current) netAbortController.current.abort();
-      if (netInterval.current) clearInterval(netInterval.current);
+      if (networkWorkerRef.current) {
+          networkWorkerRef.current.terminate(); // Жорстка зупинка
+          networkWorkerRef.current = null;
+      }
       setNetActive(false);
+      setNetStats(prev => ({ ...prev, speed: 0 })); // Скидаємо швидкість в 0, але залишаємо Total
       addLog(`Network Stress Stopped. Burned: ${netStats.total.toFixed(0)} MB`);
   };
 
@@ -669,21 +776,26 @@ export default function App() {
   const createWorkerBlob = () => URL.createObjectURL(new Blob([WORKER_CODE], { type: 'application/javascript' }));
 
   const allocateMemory = async (target = targetMB, cpu = cpuLoad) => {
+    const effectiveCpu = cpuMode === 'HASH' ? 100 : cpu; 
+    const WORKER_CAP = 1500;
+    const mainThreadCap = 0; 
+    const workerTotal = Math.max(0, target - mainThreadCap);
     if (workers.length > 0) {
-        const WORKER_CAP = 1500;
-        const mainThreadCap = 1000;
-        const workerTotal = Math.max(0, target - mainThreadCap);
         workers.forEach((w, i) => {
             const amount = Math.min(WORKER_CAP, workerTotal - (i * WORKER_CAP));
-            if (amount > 0) w.postMessage({ action: 'ALLOCATE', targetMB: amount, id: i, cpuLoad: cpu });
+            if (amount > 0) w.postMessage({ 
+                action: 'ALLOCATE', 
+                targetMB: amount, 
+                id: i, 
+                cpuLoad: effectiveCpu, 
+                mode: cpuMode, 
+                ramMode: ramMode 
+            });
         });
         return;
     }
     setIsAllocating(true);
     setAllocatedMB(0);
-    const WORKER_CAP = 1500;
-    const mainThreadCap = 1000;
-    const workerTotal = Math.max(0, target - mainThreadCap);
     const numWorkers = Math.ceil(workerTotal / WORKER_CAP);
     const newWorkers = [];
     const url = createWorkerBlob();
@@ -694,8 +806,11 @@ export default function App() {
         w.onmessage = (e) => {
             if(e.data.type === 'PROGRESS') setAllocatedMB(p => p + e.data.addedMB);
             if(e.data.type === 'ERROR') addLog(`Worker #${i} Error`, 'error');
+            else if (e.data.type === 'HASH') {
+                if (Math.random() > 0.8) addLog(`⛏️ Hashed: ${e.data.hash}`, 'success');
+            }
         };
-        w.postMessage({ action: 'ALLOCATE', targetMB: amount, id: i, cpuLoad: cpu });
+    w.postMessage({ action: 'ALLOCATE', targetMB: amount, id: i, cpuLoad: effectiveCpu, mode: cpuMode, ramMode: ramMode});
         newWorkers.push(w);
     }
     setWorkers(newWorkers);
@@ -791,6 +906,133 @@ export default function App() {
          setupGpuStage(gpuBenchMode, nextStage, newResults);
     }, 4000);
 }, [gpuBenchMode, gpuBenchStage, gpuBenchResults]);
+
+// --- MINIONS LOGIC ---
+  const [minionSize, setMinionSize] = useState(512); 
+  const [minionCount, setMinionCount] = useState(1); 
+  const [minions, setMinions] = useState([]); 
+  
+  const bcRef = useRef(null);
+
+  useEffect(() => {
+      bcRef.current = new BroadcastChannel('rampage_channel');
+      
+      bcRef.current.onmessage = (event) => {
+          // Отримуємо відповідь: { type: 'PONG', id: '...' }
+          if (event.data && event.data.type === 'PONG') {
+              const incomingId = event.data.id;
+              
+              setMinions(prev => {
+                  // 🔥 ГОЛОВНЕ ВИПРАВЛЕННЯ: Перевіряємо, чи є цей ID
+                  if (prev.some(m => m.id === incomingId)) return prev;
+                  // Якщо нема - додаємо
+                  return [...prev, { id: incomingId, zombie: true }];
+              });
+          }
+      };
+
+      // Шукаємо живих
+      bcRef.current.postMessage('PING');
+
+      return () => { if(bcRef.current) bcRef.current.close(); };
+  }, []);
+
+  const spawnMinions = () => {
+      const newMinions = [];
+      for(let i=0; i<minionCount; i++) {
+          const id = `minion_${Date.now()}_${i}`;
+          
+          const win = window.open(
+              `?minion=true&target=${minionSize}&id=${id}`, 
+              id, 
+              `width=300,height=200,left=${i*20},top=${i*20}`
+          );
+          
+          if (win) {
+              newMinions.push({ id, window: win });
+          } else {
+              addLog("Popup blocked!", 'error');
+              break;
+          }
+      }
+      
+      setMinions(prev => {
+          const exists = new Set(prev.map(m => m.id));
+          const cleanNew = newMinions.filter(m => !exists.has(m.id));
+          return [...prev, ...cleanNew];
+      });
+      addLog(`Spawned ${newMinions.length} minions.`, 'success');
+  };
+
+  const killMinions = () => {
+      minions.forEach(m => {
+          const win = m.window; 
+          if(win && !win.closed) win.close();
+      });
+      
+      // Закриваємо через радіо (для зомбі)
+      if (bcRef.current) {
+          bcRef.current.postMessage('KILL_ALL');
+      }
+
+      setMinions([]); // Чистимо список
+      addLog("All minions killed.", 'info');
+  };
+
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('minion') === 'true') {
+          if (startedRef.current) return;
+          startedRef.current = true;
+
+          const target = parseInt(params.get('target')) || 512;
+          setTargetMB(target);
+          
+          setTimeout(() => {
+              allocateMemory(target); 
+          }, 500);
+      }
+  }, []);
+
+  const isMinionWindow = new URLSearchParams(window.location.search).get('minion') === 'true';
+
+  if (isMinionWindow) {
+      useEffect(() => {
+          const bc = new BroadcastChannel('rampage_channel');
+          const params = new URLSearchParams(window.location.search);
+          
+          const myId = params.get('id') || `zombie_${Math.random().toString(36).substr(2, 9)}`;
+
+          bc.onmessage = (event) => {
+              if (event.data === 'KILL_ALL') {
+                  window.close();
+              }
+              if (event.data === 'PING') {
+                  bc.postMessage({ type: 'PONG', id: myId });
+              }
+          };
+
+          bc.postMessage({ type: 'PONG', id: myId });
+
+          return () => bc.close();
+      }, []);
+
+      return (
+          <div className="min-h-screen bg-black text-white p-4 flex flex-col items-center justify-center font-mono">
+              <h1 className="text-2xl font-black text-rose-500 animate-pulse">MINION</h1>
+              <div className="text-xs text-slate-400 mt-2">ID: {new URLSearchParams(window.location.search).get('id')?.slice(-4) || '????'}</div>
+              <div className="text-xs text-slate-500 mb-4">Eating {targetMB} MB...</div>
+              <div className="text-4xl font-bold mt-2 text-indigo-400">
+                  {allocatedMB.toFixed(0)} <span className="text-sm">MB</span>
+              </div>
+              <button onClick={() => window.close()} className="mt-8 bg-red-900/50 text-red-500 border border-red-900 px-4 py-1 rounded text-xs hover:bg-red-900 hover:text-white">
+                  SELF DESTRUCT
+              </button>
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-mono flex flex-col gap-4 overflow-hidden">
@@ -950,22 +1192,104 @@ export default function App() {
               <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase border-b border-slate-800 pb-2">
                   <Icons.Cpu size={14} /> RAM / CPU Burner
               </div>
-              <div className="space-y-1">
-                  <div className="flex justify-between text-xs"><span>RAM Target</span><span>{targetMB} MB</span></div>
-                  <input type="range" min="500" max={MAX_LIMIT} step="100" value={targetMB} onChange={e=>setTargetMB(Number(e.target.value))} className="w-full h-1 bg-slate-700 rounded-lg accent-indigo-500" disabled={isBenchmarking || gpuBenchMode!=='NONE'} />
-              </div>
-              <div className="space-y-1">
-                  <div className="flex justify-between text-xs"><span>CPU Load</span><span>{cpuLoad}%</span></div>
-                  <input type="range" min="0" max="100" step="10" value={cpuLoad} onChange={e=>setCpuLoad(Number(e.target.value))} className="w-full h-1 bg-slate-700 rounded-lg accent-orange-500" disabled={isBenchmarking || gpuBenchMode!=='NONE'} />
-              </div>
-              {!isAllocating ? (
-                   <button onClick={() => allocateMemory()} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="mt-auto bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-50">
-                       <Icons.Play size={14} /> START LOAD
-                   </button>
+
+              {/* --- MODE SWITCHER --- */}
+              <div className="flex bg-slate-950 rounded p-1 mb-2">
+                   <button onClick={() => setCpuMode('STANDARD')} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${cpuMode==='STANDARD' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-indigo-400'}`}>STANDARD</button>
+                   <button 
+                         onClick={() => setCpuMode('HASH')} 
+                         className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${cpuMode==='HASH' ? 'bg-amber-600 text-white' : 'text-slate-500 hover:text-amber-400'}`}
+                     >
+                         HASH STRESS
+                     </button>
+                   <button onClick={() => setCpuMode('MINIONS')} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${cpuMode==='MINIONS' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-rose-400'}`}>MINIONS</button>
+               </div>
+
+              {/* --- CONTROL PANELS --- */}
+              {cpuMode !== 'MINIONS' ? (
+                  <>
+                      <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1"><span>ALLOCATION PATTERN</span></div>
+                      <div className="flex bg-slate-950 rounded p-1 mb-4">
+                          <button onClick={() => setRamMode('LINEAR')} disabled={isAllocating} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${ramMode==='LINEAR' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-indigo-400'}`}>LINEAR</button>
+                          <button onClick={() => setRamMode('CHAOS')} disabled={isAllocating} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${ramMode==='CHAOS' ? 'bg-fuchsia-600 text-white' : 'text-slate-500 hover:text-fuchsia-400'}`}>CHAOS</button>
+                      </div>
+
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-xs"><span>RAM Target</span><span>{targetMB} MB</span></div>
+                          <input type="range" min="500" max={MAX_LIMIT} step="100" value={targetMB} onChange={e=>setTargetMB(Number(e.target.value))} className="w-full h-1 bg-slate-700 rounded-lg accent-indigo-500" disabled={isBenchmarking || gpuBenchMode!=='NONE'} />
+                      </div>
+
+                      {cpuMode === 'HASH' ? (
+                          <div className="space-y-1 opacity-80">
+                              <div className="flex justify-between text-xs"><span>Hash Intensity</span><span className="text-amber-400 font-bold">MAX (LOCKED)</span></div>
+                              <div className="w-full h-1 bg-slate-800 rounded-lg overflow-hidden relative">
+                                  <div className="absolute inset-0 bg-amber-600 w-full animate-pulse"></div>
+                              </div>
+                          </div>
+                      ) : (
+                          <div className="space-y-1">
+                              <div className="flex justify-between text-xs"><span>CPU Load</span><span>{cpuLoad}%</span></div>
+                              <input type="range" min="0" max="100" step="10" value={cpuLoad} onChange={e=>setCpuLoad(Number(e.target.value))} className="w-full h-1 bg-slate-700 rounded-lg accent-orange-500" disabled={isBenchmarking || gpuBenchMode!=='NONE'} />
+                          </div>
+                      )}
+                      
+                      {/* --- BUTTONS --- */}
+                      {!isAllocating ? (
+                           <button 
+                               onClick={() => allocateMemory()} 
+                               disabled={isBenchmarking || gpuBenchMode!=='NONE'} 
+                               className={`mt-auto font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-50 ${cpuMode === 'HASH' ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white'}`}
+                           >
+                               <Icons.Play size={14} /> 
+                               {cpuMode === 'HASH' ? 'START HASHING' : 'START LOAD'}
+                           </button>
+                      ) : (
+                           <button onClick={stopRAM} className="mt-auto bg-slate-700 hover:bg-red-600 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all">
+                               <Icons.Square size={14} /> STOP PROCESS
+                           </button>
+                      )}
+                  </>
               ) : (
-                   <button onClick={stopRAM} className="mt-auto bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all">
-                       <Icons.Square size={14} /> STOP RAM
-                   </button>
+                  // --- MINIONS UI ---
+                  <div className="flex flex-col gap-4 animate-in fade-in duration-300">
+                      <div className="p-2 bg-rose-900/20 border border-rose-500/30 rounded text-[10px] text-rose-200 leading-tight">
+                          <strong className="text-rose-400">WARNING:</strong> Spawns separate windows to bypass browser memory limits. 
+                          <br/>Allow popups if blocked.
+                      </div>
+                      
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-xs"><span>Window Size</span><span>{minionSize} MB</span></div>
+                          <input 
+                              type="range" 
+                              min="256" max="2048" step="128" 
+                              value={minionSize} 
+                              onChange={e=>setMinionSize(Number(e.target.value))} 
+                              className="w-full h-1 bg-slate-700 rounded-lg accent-rose-500" 
+                          />
+                      </div>
+                      
+                      <div className="space-y-1">
+                          <div className="flex justify-between text-xs"><span>Count</span><span>{minionCount} Wins</span></div>
+                          <input 
+                              type="range" 
+                              min="1" max="20" step="1" 
+                              value={minionCount} 
+                              onChange={e=>setMinionCount(Number(e.target.value))} 
+                              className="w-full h-1 bg-slate-700 rounded-lg accent-rose-500" 
+                          />
+                          <div className="text-right text-[10px] text-slate-500">Total: {(minionSize * minionCount / 1024).toFixed(1)} GB</div>
+                      </div>
+
+                      {minions.length === 0 ? (
+                          <button onClick={spawnMinions} className="mt-auto bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all shadow-lg shadow-rose-900/20">
+                              <Icons.Layers size={14} /> SPAWN MINIONS
+                          </button>
+                      ) : (
+                          <button onClick={killMinions} className="mt-auto bg-slate-700 hover:bg-red-600 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all">
+                              <Icons.Trash2 size={14} /> KILL ALL ({minions.length})
+                          </button>
+                      )}
+                  </div>
               )}
           </div>
 
