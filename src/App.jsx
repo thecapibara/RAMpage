@@ -288,11 +288,11 @@ const NORMAL_SUITE = [ // Standard
 
 const BURNER_SUITE = [ // Extreme
     { mode: 'FRACTAL', res: 4096, od: 1 }, { mode: 'FRACTAL', res: 4096, od: 5 }, { mode: 'FRACTAL', res: 4096, od: 10 }, { mode: 'FRACTAL', res: 4096, od: 15 },
-    { mode: 'FRACTAL', res: 8192, od: 1 }, { mode: 'FRACTAL', res: 8192, od: 5 }, { mode: 'FRACTAL', res: 8192, od: 10 }, { mode: 'FRACTAL', res: 8192, od: 15 },
+    { mode: 'FRACTAL', res: 8192, od: 1 },
     { mode: '3D', res: 4096, od: 1 }, { mode: '3D', res: 4096, od: 5 }, { mode: '3D', res: 4096, od: 10 }, { mode: '3D', res: 4096, od: 15 },
-    { mode: '3D', res: 8192, od: 1 }, { mode: '3D', res: 8192, od: 5 }, { mode: '3D', res: 8192, od: 10 }, { mode: '3D', res: 8192, od: 15 },
+    { mode: '3D', res: 8192, od: 1 },
     { mode: 'FIRE', res: 4096, od: 1 }, { mode: 'FIRE', res: 4096, od: 5 }, { mode: 'FIRE', res: 4096, od: 10 }, { mode: 'FIRE', res: 4096, od: 15 },
-    { mode: 'FIRE', res: 8192, od: 1 }, { mode: 'FIRE', res: 8192, od: 5 }, { mode: 'FIRE', res: 8192, od: 10 }, { mode: 'FIRE', res: 8192, od: 15 },
+    { mode: 'FIRE', res: 8192, od: 1 },
 ];
 
 export default function App() {
