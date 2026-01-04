@@ -479,6 +479,7 @@ export default function App() {
   const [isAllocating, setIsAllocating] = useState(false);
   const [workers, setWorkers] = useState([]);
   const [chartDataRAM, setChartDataRAM] = useState([]);
+  const [isMobile, setIsMobile] = useState(false);
   
   const [storageUsed, setStorageUsed] = useState(0);
   const [storageCount, setStorageCount] = useState(0); 
@@ -551,6 +552,12 @@ export default function App() {
           NORMAL: Number(n || 0),
           BURNER: Number(b || 0)
       });
+  }, []);
+
+  // Mobile check
+  useEffect(() => {
+    const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    setIsMobile(checkMobile);
   }, []);
 
   // Force Storage UI update loop
@@ -1202,7 +1209,17 @@ export default function App() {
                      >
                          HASH STRESS
                      </button>
-                   <button onClick={() => setCpuMode('MINIONS')} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${cpuMode==='MINIONS' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-rose-400'}`}>MINIONS</button>
+                   <button 
+                       onClick={() => !isMobile && setCpuMode('MINIONS')} 
+                       disabled={isMobile}
+                       className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors 
+                           ${isMobile 
+                               ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700' // off for mobile
+                               : (cpuMode === 'MINIONS' ? 'bg-rose-600 text-white' : 'text-slate-500 hover:text-rose-400') // on for desktop
+                           }`}
+                   >
+                       {isMobile ? 'MINIONS (PC ONLY)' : 'MINIONS'}
+                   </button>
                </div>
 
               {/* --- CONTROL PANELS --- */}
@@ -1253,7 +1270,7 @@ export default function App() {
                   // --- MINIONS UI ---
                   <div className="flex flex-col gap-4 animate-in fade-in duration-300">
                       <div className="p-2 bg-rose-900/20 border border-rose-500/30 rounded text-[10px] text-rose-200 leading-tight">
-                          <strong className="text-rose-400">WARNING:</strong> Spawns separate windows to bypass browser memory limits. 
+                          <strong className="text-rose-400">WARNING:</strong> Spawns separate windows to bypass browser memory limits. Only for desktop browsers. 
                           <br/>Allow popups if blocked.
                       </div>
                       
