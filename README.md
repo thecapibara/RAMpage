@@ -16,7 +16,7 @@ This software is developed strictly for **educational purposes** and for **stres
 * **DO NOT** use this tool for malicious "Denial of Service" attacks or to freeze user browsers on purpose.
 * **Liability:** The developer is not responsible for any data loss, hardware instability, or system crashes resulting from the misuse of this tool. By using this software, you agree that you are testing your own system limits.
 
-## ✨ Key Features (v4.0 Update)
+## ✨ Key Features
 
 * **🧠 High-Volume RAM Allocation:** Push memory usage to the limit (up to ~16GB) using multi-threaded Web Workers to test Garbage Collection and OOM behavior.
 * **🔥 CPU Stress Test:** Integrated CPU burner with adjustable intensity (0-100%) that runs complex math operations on separate threads.
