@@ -117,13 +117,15 @@ void main() {
 
 const VERT_SHADER = `precision mediump float; attribute vec2 position; void main() { gl_Position = vec4(position, 0.0, 1.0); }`;
 
-// --- WORKER (CPU/RAM) ---
 const WORKER_CODE = `
   let memoryStore = [];
   let cpuIntensity = 0;
   let stressMode = 'STANDARD'; 
   let allocMode = 'LINEAR';
   let isRunning = true; 
+  
+  // Для WASM нам треба тримати посилання на поточний активний блок пам'яті
+  let currentWasmInstance = null; 
 
   const heavyHash = (str) => {
       let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -165,6 +167,8 @@ const WORKER_CODE = `
 
       const CHUNK_SIZE = 10; 
       const BYTES_PER_MB = 1024 * 1024;
+      // 1 Wasm Page = 64KB. 10MB = 160 pages.
+      const PAGES_PER_CHUNK = 160; 
       const steps = Math.ceil(targetMB / CHUNK_SIZE);
       
       try {
@@ -177,7 +181,31 @@ const WORKER_CODE = `
              if (chaosType < 0.33) { memoryStore.push(new Float64Array((CHUNK_SIZE * BYTES_PER_MB) / 8).fill(Math.random())); } 
              else if (chaosType < 0.66) { memoryStore.push("X".repeat((CHUNK_SIZE * BYTES_PER_MB)/2)); } 
              else { memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1)); }
+          
+          } else if (allocMode === 'WASM') {
+              // --- WASM LEAK LOGIC ---
+              try {
+                  if (!currentWasmInstance) {
+                      // Створюємо нову пам'ять (початково 10МБ)
+                      currentWasmInstance = new WebAssembly.Memory({ initial: PAGES_PER_CHUNK });
+                      memoryStore.push(currentWasmInstance);
+                  } else {
+                      // Розширюємо існуючу (+10МБ)
+                      currentWasmInstance.grow(PAGES_PER_CHUNK);
+                  }
+              } catch (e) {
+                  // Якщо одна Wasm пам'ять заповнена (ліміт зазвичай 2GB-4GB), створюємо нову
+                  // Це дозволяє обійти ліміт однієї Wasm інстанції
+                  try {
+                      currentWasmInstance = new WebAssembly.Memory({ initial: PAGES_PER_CHUNK });
+                      memoryStore.push(currentWasmInstance);
+                  } catch (fatal) {
+                      throw new Error("Wasm Memory Limit Reached (Global)");
+                  }
+              }
+
           } else {
+              // LINEAR
               memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1));
           }
 
@@ -204,6 +232,7 @@ const WORKER_CODE = `
     } else if (action === 'STOP' || action === 'CLEAR') { 
       isRunning = false;
       memoryStore = []; 
+      currentWasmInstance = null; // Скидаємо посилання на Wasm
       try { if(globalThis.gc) globalThis.gc(); } catch(e){} 
       if(action === 'CLEAR') self.postMessage({ type: 'CLEARED', id });
     }
@@ -267,6 +296,77 @@ const NETWORK_WORKER_CODE = `
   };
 `;
 
+// --- STORAGE WORKER (OPFS) ---
+const OPFS_WORKER_CODE = `
+  let isRunning = false;
+  let accessHandle = null;
+  let root = null;
+  let fileHandle = null;
+
+  self.onmessage = async (e) => {
+    if (e.data === 'START') {
+      if (isRunning) return;
+      isRunning = true;
+
+      try {
+        // 1. Отримуємо доступ до кореневої папки
+        root = await navigator.storage.getDirectory();
+        
+        // 2. Створюємо (або відкриваємо) один ВЕЛЕТЕНСЬКИЙ файл
+        fileHandle = await root.getFileHandle('rampage_heavy.bin', { create: true });
+        
+        // 3. Отримуємо синхронний хендл (тільки для Web Workers!)
+        accessHandle = await fileHandle.createSyncAccessHandle();
+
+        // 4. Підготовка буфера (10 MB)
+        const CHUNK_SIZE = 10 * 1024 * 1024;
+        const buffer = new Uint8Array(CHUNK_SIZE).fill(Math.random() * 255);
+
+        // 5. Цикл запису
+        while (isRunning) {
+          try {
+            // Пишемо синхронно (найшвидший спосіб у браузері)
+            accessHandle.write(buffer); 
+            accessHandle.flush(); // Примусово зберігаємо на диск
+            
+            self.postMessage({ type: 'WRITTEN', mb: 10 });
+          } catch (err) {
+            // Якщо диск повний (Quota Exceeded)
+            self.postMessage({ type: 'ERROR', msg: err.message });
+            isRunning = false; 
+          }
+        }
+      } catch (err) {
+        self.postMessage({ type: 'ERROR', msg: err.message });
+        isRunning = false;
+      }
+
+    } else if (e.data === 'STOP') {
+      isRunning = false;
+      if (accessHandle) {
+        accessHandle.close(); // Обов'язково закриваємо хендл
+        accessHandle = null;
+      }
+      self.postMessage({ type: 'STOPPED' });
+
+    } else if (e.data === 'CLEAR') {
+      isRunning = false;
+      if (accessHandle) {
+        accessHandle.close();
+        accessHandle = null;
+      }
+      try {
+        if (!root) root = await navigator.storage.getDirectory();
+        // Видаляємо файл
+        await root.removeEntry('rampage_heavy.bin');
+        self.postMessage({ type: 'CLEARED' });
+      } catch (err) {
+        // Ігноруємо помилку, якщо файлу немає
+        self.postMessage({ type: 'CLEARED' });
+      }
+    }
+  };
+`;
 
 
 // --- GpuCanvas ---
@@ -486,7 +586,7 @@ export default function App() {
   const [isFillingStorage, setIsFillingStorage] = useState(false);
   const [chartDataStorage, setChartDataStorage] = useState([]);
   const isFillingStorageRef = useRef(false);
-  const dbRef = useRef(null);
+  const storageWorkerRef = useRef(null);
   
   const [forceUpdateStorage, setForceUpdateStorage] = useState(0);
   
@@ -526,6 +626,13 @@ export default function App() {
   const [gpuHighScores, setGpuHighScores] = useState({ LIGHT: 0, NORMAL: 0, BURNER: 0 });
   const [showBenchResults, setShowBenchResults] = useState(false);
   
+  // --- VRAM BURNER STATE ---
+  const [vramActive, setVramActive] = useState(false);
+  const [vramCount, setVramCount] = useState(0);
+  const vramInterval = useRef(null);
+  const vramContext = useRef(null);
+  const vramStore = useRef([]); 
+
   const gpuBenchInterval = useRef(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
@@ -829,54 +936,58 @@ export default function App() {
       setIsAllocating(false);
   };
 
-  const fillStorage = async () => {
+  // --- OPFS STORAGE LOGIC ---
+  
+  const initStorageWorker = () => {
+      if (storageWorkerRef.current) return storageWorkerRef.current;
+      
+      const blob = new Blob([OPFS_WORKER_CODE], { type: 'application/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      
+      worker.onmessage = (e) => {
+          if (e.data.type === 'WRITTEN') {
+              setStorageUsed(prev => prev + e.data.mb);
+              setStorageCount(prev => prev + 1); // Рахуємо блоки по 10МБ
+          } else if (e.data.type === 'ERROR') {
+              addLog(`Storage Full/Error: ${e.data.msg}`, 'warning');
+              stopStorage();
+          } else if (e.data.type === 'CLEARED') {
+              setStorageUsed(0);
+              setStorageCount(0);
+              addLog("Storage Cleaned (OPFS).", 'success');
+          }
+      };
+      
+      storageWorkerRef.current = worker;
+      return worker;
+  };
+
+  const fillStorage = () => {
       if (isFillingStorage) return;
       setIsFillingStorage(true);
-      isFillingStorageRef.current = true; 
-      addLog("Storage: Starting flood...");
-      const DB_NAME = 'DiskKillerDB';
-      const STORE_NAME = 'blobs';
-      try {
-          const request = indexedDB.open(DB_NAME, 1);
-          request.onupgradeneeded = (e) => { e.target.result.createObjectStore(STORE_NAME, {autoIncrement: true}); };
-          request.onsuccess = async (e) => {
-              const db = e.target.result;
-              dbRef.current = db; 
-              const CHUNK_SIZE = 10 * 1024 * 1024; 
-              const writeChunk = () => {
-                  if(!isFillingStorageRef.current) return; 
-                  try {
-                      const trans = db.transaction([STORE_NAME], 'readwrite');
-                      const store = trans.objectStore(STORE_NAME);
-                      const data = new Uint8Array(CHUNK_SIZE).fill(1);
-                      const blob = new Blob([data]);
-                      const req = store.add(blob);
-                      req.onsuccess = () => {
-                          const addedMB = CHUNK_SIZE / (1024 * 1024);
-                          setStorageUsed(prev => prev + addedMB);
-                          setStorageCount(prev => prev + 1); 
-                          if(isFillingStorageRef.current) setTimeout(writeChunk, 5);
-                      };
-                      req.onerror = () => stopStorage();
-                  } catch (e) { stopStorage(); }
-              };
-              writeChunk();
-          };
-      } catch (e) { stopStorage(); }
+      isFillingStorageRef.current = true;
+      addLog("Storage: Starting High-Speed OPFS Writer...");
+      
+      const worker = initStorageWorker();
+      worker.postMessage('START');
   };
 
   const stopStorage = () => {
       setIsFillingStorage(false);
       isFillingStorageRef.current = false;
+      
+      if (storageWorkerRef.current) {
+          storageWorkerRef.current.terminate();
+          storageWorkerRef.current = null; 
+      }
+      addLog("Storage Writer Stopped (Terminated).");
   };
 
   const clearStorage = () => {
       stopStorage();
-      if (dbRef.current) { dbRef.current.close(); dbRef.current = null; }
-      setTimeout(() => {
-          const req = indexedDB.deleteDatabase('DiskKillerDB');
-          req.onsuccess = () => { setStorageUsed(0); setStorageCount(0); addLog("Storage Cleaned."); };
-      }, 100);
+      
+      const worker = initStorageWorker(); 
+      worker.postMessage('CLEAR');
   };
 
   const clearAll = () => {
@@ -918,6 +1029,7 @@ export default function App() {
   const [minionSize, setMinionSize] = useState(512); 
   const [minionCount, setMinionCount] = useState(1); 
   const [minions, setMinions] = useState([]); 
+  const [minionWebRTC, setMinionWebRTC] = useState(false);
   
   const bcRef = useRef(null);
 
@@ -950,7 +1062,7 @@ export default function App() {
           const id = `minion_${Date.now()}_${i}`;
           
           const win = window.open(
-              `?minion=true&target=${minionSize}&id=${id}`, 
+              `?minion=true&target=${minionSize}&id=${id}&webrtc=${minionWebRTC}`, 
               id, 
               `width=300,height=200,left=${i*20},top=${i*20}`
           );
@@ -1006,25 +1118,95 @@ export default function App() {
   const isMinionWindow = new URLSearchParams(window.location.search).get('minion') === 'true';
 
   if (isMinionWindow) {
+      const params = new URLSearchParams(window.location.search);
+      const myId = params.get('id') || `zombie_${Math.random().toString(36).substr(2, 9)}`;
+      const useWebRTC = params.get('webrtc') === 'true'; // Перевірка прапорця
+
+      // --- WEBRTC STORM ---
+      useEffect(() => {
+          if (!useWebRTC) return;
+
+          const connections = [];
+          const STORM_INTENSITY = 5;
+
+          const startConnection = () => {
+              const pc1 = new RTCPeerConnection();
+              const pc2 = new RTCPeerConnection();
+
+              pc1.onicecandidate = e => e.candidate && pc2.addIceCandidate(e.candidate).catch(()=>{});
+              pc2.onicecandidate = e => e.candidate && pc1.addIceCandidate(e.candidate).catch(()=>{});
+
+              // Створення каналу даних
+              const dc = pc1.createDataChannel("storm");
+              
+              dc.onopen = () => {
+                  const interval = setInterval(() => {
+                      if (dc.readyState === 'open') {
+                          const junk = new Uint8Array(16 * 1024).fill(Math.random() * 255);
+                          try { dc.send(junk); } catch(e){}
+                      }
+                  }, 5); 
+                  connections.push({ close: () => clearInterval(interval) });
+              };
+
+              pc1.createOffer().then(offer => {
+                  pc1.setLocalDescription(offer);
+                  pc2.setRemoteDescription(offer);
+                  return pc2.createAnswer();
+              }).then(answer => {
+                  pc2.setLocalDescription(answer);
+                  pc1.setRemoteDescription(answer);
+              });
+
+              connections.push(pc1, pc2);
+          };
+
+          for(let i=0; i<STORM_INTENSITY; i++) {
+              setTimeout(startConnection, i * 200);
+          }
+
+          return () => {
+              connections.forEach(c => c.close && c.close());
+          };
+      }, [useWebRTC]);
+
+  if (isMinionWindow) {
       useEffect(() => {
           const bc = new BroadcastChannel('rampage_channel');
-          const params = new URLSearchParams(window.location.search);
           
-          const myId = params.get('id') || `zombie_${Math.random().toString(36).substr(2, 9)}`;
-
           bc.onmessage = (event) => {
-              if (event.data === 'KILL_ALL') {
-                  window.close();
-              }
-              if (event.data === 'PING') {
-                  bc.postMessage({ type: 'PONG', id: myId });
-              }
+              if (event.data === 'KILL_ALL') window.close();
+              if (event.data === 'PING') bc.postMessage({ type: 'PONG', id: myId });
           };
 
           bc.postMessage({ type: 'PONG', id: myId });
-
           return () => bc.close();
       }, []);
+
+      return (
+          <div className="min-h-screen bg-black text-white p-4 flex flex-col items-center justify-center font-mono">
+              <h1 className="text-2xl font-black text-rose-500 animate-pulse">MINION</h1>
+              <div className="text-xs text-slate-400 mt-2">ID: {myId.slice(-4)}</div>
+              
+              <div className="flex flex-col items-center gap-2 mt-4">
+                   <div className="text-xs text-slate-500">Eating {targetMB} MB...</div>
+                   {/* Індикатор WebRTC */}
+                   {useWebRTC && (
+                       <div className="text-[10px] font-bold text-amber-500 border border-amber-500/50 px-2 py-1 rounded bg-amber-900/20 animate-pulse flex items-center gap-2">
+                           <Icons.Wifi size={10}/> WEBRTC STORM ACTIVE
+                       </div>
+                   )}
+              </div>
+
+              <div className="text-4xl font-bold mt-4 text-indigo-400">
+                  {allocatedMB.toFixed(0)} <span className="text-sm">MB</span>
+              </div>
+              <button onClick={() => window.close()} className="mt-8 bg-red-900/50 text-red-500 border border-red-900 px-4 py-1 rounded text-xs hover:bg-red-900 hover:text-white">
+                  SELF DESTRUCT
+              </button>
+          </div>
+      );
+  }
 
       return (
           <div className="min-h-screen bg-black text-white p-4 flex flex-col items-center justify-center font-mono">
@@ -1040,6 +1222,78 @@ export default function App() {
           </div>
       );
   }
+
+  const runVramBurner = () => {
+      if(vramActive) return;
+      setVramActive(true);
+      setVramCount(0);
+      addLog("VRAM Burner: Initializing (Eating 64MB chunks)...", "warning");
+
+      // Створюємо невидимий canvas для роботи з пам'яттю
+      const canvas = document.createElement('canvas');
+      // Маленький розмір, бо нам не треба малювати, треба зберігати дані
+      canvas.width = 1; canvas.height = 1; 
+      
+      const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+      
+      if(!gl) {
+          addLog("VRAM Error: WebGL not supported", "error");
+          setVramActive(false);
+          return;
+      }
+      
+      vramContext.current = gl;
+      vramStore.current = [];
+
+      const TEX_SIZE = 4096;
+      const BUFFER = new Uint8Array(TEX_SIZE * TEX_SIZE * 4).fill(255); 
+
+      vramInterval.current = setInterval(() => {
+          try {
+              if (gl.isContextLost()) {
+                  throw new Error("Context Lost (VRAM Full)");
+              }
+              
+              const texture = gl.createTexture();
+              gl.bindTexture(gl.TEXTURE_2D, texture);
+              
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, TEX_SIZE, TEX_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, BUFFER);
+              
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+              gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+              // Зберігаємо посилання, щоб Garbage Collector не видалив текстуру
+              vramStore.current.push(texture);
+              setVramCount(prev => prev + 1);
+              
+          } catch (e) {
+              addLog(`VRAM Limit Hit: ${e.message}`, "error");
+              stopVramBurner();
+          }
+      }, 200);
+  };
+
+  const stopVramBurner = () => {
+      if(vramInterval.current) clearInterval(vramInterval.current);
+      
+      const gl = vramContext.current;
+      if (gl) {
+          // Примусово втрачаємо контекст для миттєвого очищення пам'яті
+          const ext = gl.getExtension('WEBGL_lose_context');
+          if(ext) ext.loseContext();
+          
+          // Або видаляємо текстури вручну, якщо контекст ще живий
+          if(!gl.isContextLost()) {
+              vramStore.current.forEach(t => gl.deleteTexture(t));
+          }
+      }
+      
+      vramStore.current = [];
+      vramContext.current = null;
+      setVramActive(false);
+      addLog(`VRAM Burner Stopped. Freed memory.`, "info");
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 font-mono flex flex-col gap-4 overflow-hidden">
@@ -1229,6 +1483,7 @@ export default function App() {
                       <div className="flex bg-slate-950 rounded p-1 mb-4">
                           <button onClick={() => setRamMode('LINEAR')} disabled={isAllocating} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${ramMode==='LINEAR' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-indigo-400'}`}>LINEAR</button>
                           <button onClick={() => setRamMode('CHAOS')} disabled={isAllocating} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${ramMode==='CHAOS' ? 'bg-fuchsia-600 text-white' : 'text-slate-500 hover:text-fuchsia-400'}`}>CHAOS</button>
+                          <button onClick={() => setRamMode('WASM')} disabled={isAllocating} className={`flex-1 py-1 text-[10px] font-bold rounded transition-colors ${ramMode==='WASM' ? 'bg-cyan-600 text-white' : 'text-slate-500 hover:text-cyan-400'}`}>WASM</button>
                       </div>
 
                       <div className="space-y-1">
@@ -1296,7 +1551,19 @@ export default function App() {
                           />
                           <div className="text-right text-[10px] text-slate-500">Total: {(minionSize * minionCount / 1024).toFixed(1)} GB</div>
                       </div>
-
+                        <div className="flex items-center gap-2 bg-slate-950 p-2 rounded border border-slate-800">
+                          <input 
+                              type="checkbox" 
+                              id="webrtcCheck" 
+                              checked={minionWebRTC} 
+                              onChange={(e) => setMinionWebRTC(e.target.checked)}
+                              className="w-4 h-4 accent-rose-600 bg-slate-800 border-slate-600 rounded cursor-pointer"
+                          />
+                          <label htmlFor="webrtcCheck" className="text-xs text-slate-400 font-bold cursor-pointer select-none flex items-center gap-1">
+                              <Icons.Wifi size={12} className="text-rose-500"/> 
+                              ENABLE WEBRTC STORM
+                          </label>
+                      </div>
                       {minions.length === 0 ? (
                           <button onClick={spawnMinions} className="mt-auto bg-rose-600 hover:bg-rose-500 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all shadow-lg shadow-rose-900/20">
                               <Icons.Layers size={14} /> SPAWN MINIONS
@@ -1322,7 +1589,9 @@ export default function App() {
                       <span>{storageCount} Files</span>
                   </div>
               </div>
-              <p className="text-[10px] text-slate-500 leading-tight">Writes 10MB blobs to IndexedDB until browser throws QuotaExceededError.</p>
+              <p className="text-[10px] text-slate-500 leading-tight">
+                    Writes raw 10MB chunks directly to disk via OPFS (Sync Access Handle) until quota limit.
+            </p>
               {!isFillingStorage ? (
                   <div className="mt-auto flex gap-2">
                       <button onClick={fillStorage} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className="flex-1 bg-amber-700 hover:bg-amber-600 text-white font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-50">
@@ -1366,8 +1635,35 @@ export default function App() {
                   <input type="range" min="1" max="20" step="1" value={gpuOverdrive} onChange={e=>setGpuOverdrive(Number(e.target.value))} className="w-full h-1 bg-slate-700 accent-red-500" disabled={isBenchmarking || gpuBenchMode!=='NONE'} />
               </div>
               <button onClick={() => { setGpuActive(!gpuActive); setActiveTab('GPU'); }} disabled={isBenchmarking || gpuBenchMode!=='NONE'} className={`mt-auto font-bold py-2 rounded flex items-center justify-center gap-2 text-sm transition-all disabled:opacity-50 ${gpuActive ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
-                  {gpuActive ? 'MANUAL STOP' : 'MANUAL START'}
+                  {gpuActive ? 'MANUAL STOP' : 'SHADER TEST'}
               </button>
+              {/* --- VRAM BURNER (NEW SECTION) --- */}
+              <div className="pt-2 border-t border-slate-800 mt-2">
+                  <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1">
+                      <span className="flex items-center gap-1 font-bold text-slate-400">
+                          <Icons.Zap size={10} className="text-amber-500"/> VRAM EATER
+                      </span>
+                      <span className="text-amber-500 font-mono font-bold">{(vramCount * 64).toLocaleString()} MB</span>
+                  </div>
+                  
+                  {!vramActive ? (
+                      <button 
+                          onClick={runVramBurner} 
+                          disabled={isBenchmarking || gpuBenchMode!=='NONE'} 
+                          className="w-full bg-slate-950 border border-slate-700 hover:bg-amber-900/40 hover:text-amber-400 hover:border-amber-700 text-slate-400 font-bold py-1.5 rounded text-xs transition-all flex items-center justify-center gap-2"
+                      >
+                          <Icons.Layers size={12} /> EAT VRAM
+                      </button>
+                  ) : (
+                      <button 
+                          onClick={stopVramBurner} 
+                          className="w-full bg-amber-700 hover:bg-amber-600 text-white font-bold py-1.5 rounded text-xs transition-all animate-pulse shadow-[0_0_10px_rgba(245,158,11,0.5)]"
+                      >
+                          STOP EATING ({vramCount})
+                      </button>
+                  )}
+                  <div className="text-[8px] text-slate-600 text-center mt-1">Allocates 64MB uncompressed textures</div>
+              </div>
           </div>
 
           {/* COL 4: BENCHMARKS */}
