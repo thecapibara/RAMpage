@@ -1,4 +1,4 @@
-# RAMpage! [ex-RAM Eater Ultimate] v4.2
+# RAMpage! [ex-RAM Eater Ultimate] v4.4
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-18-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky) [![App](https://img.shields.io/badge/demo-online-green?logo=vercel&logoColor=white)](https://ram-eater.vercel.app/)
 
@@ -26,7 +26,8 @@ This software is developed strictly for **educational purposes** and for **stres
     * **3 Modes:** Fractal, 3D Raymarching, and Particle Fire.
     * **Resolution Scaling:** Render up to 8K resolution.
     * **Overdrive:** Render multiple passes per frame to maximize GPU load.
-* **💾 Storage Killer:** Rapidly fills local disk space by writing 10MB binary blobs to IndexedDB until the browser throws a Quota Exceeded error.
+    * **VRAM Burner:** Allocates massive invisible textures to rapidly consume available GPU video memory (VRAM).
+* **💾 Storage Killer:** Rapidly fills local disk space with raw binary data using high-speed OPFS sync writes until the browser quota is exceeded.
 * **⚡ Network Storm:** Simulates heavy network traffic by running parallel download streams and request floods to saturate bandwidth.
 * **🏆 Competitive Benchmarking:**
     * **CPU Survival:** Test how long your browser can survive increasing RAM/CPU loads.
