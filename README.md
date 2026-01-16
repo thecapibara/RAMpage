@@ -43,8 +43,9 @@ This project uses **Vite** and **Tailwind CSS**.
 
 ### 1. Clone the repository
 
-```git clone https://github.com/thecapibara/rameater.git
-cd rameater
+```git clone https://github.com/thecapibara/rampage.git```
+```
+cd rampage
 ```
 
 ### 2. Install Dependencies
