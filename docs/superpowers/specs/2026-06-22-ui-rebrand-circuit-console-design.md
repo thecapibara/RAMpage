@@ -6,7 +6,7 @@
 
 ## Problem
 
-The dashboard reads as "AI slop": graffiti font (`Permanent Marker`) on the title, decorative `rotate-3` / `-skew-x-6` transforms, a per-button rainbow (indigo / amber / rose / fuchsia / cyan / teal / emerald — every module a different hue), decorative glow shadows on static elements, and a `v4.4 • JustGL & Gemini` credit. None of it matches the app's own brand icon, which is a **circuit-board monster (electric green `#00FF66` + cyan glow `#00FFFF` on pure black) eating a RAM stick**.
+The dashboard reads as "AI slop": graffiti font (`Permanent Marker`) on the title, decorative `rotate-3` / `-skew-x-6` transforms, a per-button rainbow (indigo / amber / rose / fuchsia / cyan / teal / emerald — every module a different hue), and decorative glow shadows on static elements. None of it matches the app's own brand icon, which is a **circuit-board monster (electric green `#00FF66` + cyan glow `#00FFFF` on pure black) eating a RAM stick**. (The authorship credit in the header is fine in intent — it just needs restyling and a version bump; see Surfaces.)
 
 ## Goal
 
@@ -37,7 +37,7 @@ Rationale: one green everywhere replaces the rainbow. Cyan marks "this subsystem
 - `<style>` block importing `Permanent Marker` font + `.font-graffiti` class → **deleted entirely**.
 - Title skew: `transform -skew-x-6` → removed.
 - Logo container rotation: `transform rotate-3` → removed.
-- `v4.4 • JustGL & Gemini` credit → removed from header.
+- `v4.4 • JustGL & Gemini` credit → **kept and restyled** to fit the theme: mono, `text-[#5a7a5a]` muted, `tracking-widest uppercase`, no drop-shadow. Version bumped to **`v4.5`**. Rendered as `v4.5 • STRESS SUITE • BY JUSTGL & GEMINI` (or equivalent) so authorship stays but reads as a console label, not a sticker.
 - Decorative glow shadows on static buttons/elements (e.g. `shadow-[0_0_10px_rgba(245,158,11,0.5)]`) → removed unless the element represents an active/burning state.
 - Per-module accent colors (Storage amber, GPU teal, Network cyan, Benchmarks indigo/rose) → all replaced by the green/cyan/red system above.
 
@@ -119,7 +119,7 @@ Rendered as a dot + uppercase label. No new `useEffect`, no new interval.
 - No changes to `ramWorker.js`, `networkWorker.js`, `storageWorker.js`.
 - No changes to `SimpleChart.jsx`, `GpuCanvas.jsx`, `MinionWindow.jsx`, `ErrorBoundary.jsx` internals. (Chart gets new `color` prop values only.)
 - No new dependencies. No Tailwind theme extension in v1 (literal hex classes are fine and keep the diff localized).
-- No copy/wording changes to button labels other than the header credit removal (the mode names like "HASH STRESS", "MINIONS", "CHAOS" stay — they describe functions, not decoration).
+- No copy/wording changes to button labels or mode names (the mode names like "HASH STRESS", "MINIONS", "CHAOS" stay — they describe functions, not decoration). The only text change is the header credit line being restyled and bumped to `v4.5`.
 - No favicon/icon rework (brand icon already correct).
 - `App.css` leftover Vite template styles (`.logo`, `logo-spin`) — leave untouched; not loaded by Dashboard.
 
