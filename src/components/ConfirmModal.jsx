@@ -5,30 +5,23 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-slate-950 border-2 border-red-500 rounded-xl overflow-hidden shadow-[0_0_20px_rgba(239,68,68,0.3)] p-6 font-mono">
-        {/* Top bar with alert symbol */}
-        <div className="flex items-center gap-3 border-b border-red-500/20 pb-4 mb-4">
-          <Icons.ShieldAlert className="text-red-500 w-8 h-8 animate-pulse" />
-          <h2 className="text-lg font-black text-white uppercase tracking-wider">{title}</h2>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4">
+      <div className="w-full max-w-md bg-[#0E0E10] border border-[#F87171]/50 rounded-xl p-6">
+        <div className="flex items-center gap-3 border-b border-[#232327] pb-4 mb-4">
+          <Icons.ShieldAlert className="text-[#F87171] w-7 h-7 animate-pulse" />
+          <h2 className="text-base font-semibold text-[#ECECEC] uppercase tracking-wide">{title}</h2>
         </div>
-        
-        {/* Message body */}
-        <p className="text-sm text-slate-300 mb-6 leading-relaxed">
-          {message}
-        </p>
-        
-        {/* Action buttons */}
-        <div className="flex gap-4">
-          <button 
+        <p className="text-sm text-[#ECECEC] mb-6 leading-relaxed">{message}</p>
+        <div className="flex gap-3">
+          <button
             onClick={onCancel}
-            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-lg text-xs border border-slate-700 transition-colors uppercase"
+            className="flex-1 bg-transparent border border-[#232327] text-[#8B8B92] font-semibold py-2.5 rounded-lg text-xs hover:border-[#3A3A42] hover:text-[#ECECEC] transition-colors uppercase tracking-wide"
           >
             Cancel
           </button>
-          <button 
+          <button
             onClick={onConfirm}
-            className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-lg text-xs border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)] hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all uppercase"
+            className="flex-1 bg-[#F87171]/15 text-[#F87171] border border-[#F87171]/40 hover:bg-[#F87171]/25 font-semibold py-2.5 rounded-lg text-xs transition-colors uppercase tracking-wide"
           >
             Confirm
           </button>
