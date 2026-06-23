@@ -143,27 +143,27 @@ export default function MinionWindow() {
   }, [useWebRTC]);
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 flex flex-col items-center justify-center font-mono select-none">
-      <h1 className="text-2xl font-black text-rose-500 animate-pulse">MINION</h1>
-      <div className="text-xs text-slate-400 mt-2">ID: {myId.slice(-4)}</div>
-      
+    <div className="min-h-screen bg-[#0E0E10] text-[#ECECEC] p-4 flex flex-col items-center justify-center font-sans select-none">
+      <h1 className="text-xl font-semibold text-[#F87171] tracking-wide">MINION</h1>
+      <div className="text-xs text-[#8B8B92] mt-2 font-mono">id: {myId.slice(-4)}</div>
+
       <div className="flex flex-col items-center gap-2 mt-4">
-        <div className="text-xs text-slate-500">Eating {targetMB} MB...</div>
+        <div className="text-xs text-[#5A5A62]">eating {targetMB} MB…</div>
         {useWebRTC && (
-          <div className="text-[10px] font-bold text-amber-500 border border-amber-500/50 px-2 py-1 rounded bg-amber-900/20 animate-pulse flex items-center gap-2">
-            <Icons.Wifi size={10}/> WEBRTC STORM ACTIVE
+          <div className="text-[10px] font-semibold text-[#34D399] border border-[#34D399]/40 px-2 py-1 rounded bg-[#34D399]/10 flex items-center gap-2">
+            <Icons.Wifi size={10} /> WEBRTC STORM
           </div>
         )}
       </div>
 
-      <div className="text-4xl font-bold mt-4 text-indigo-400">
-        {allocatedMB.toFixed(0)} <span className="text-sm">MB</span>
+      <div className="text-4xl font-mono font-semibold mt-4 text-[#34D399]">
+        {allocatedMB.toFixed(0)} <span className="text-sm text-[#5A5A62]">MB</span>
       </div>
-      <button 
-        onClick={() => window.close()} 
-        className="mt-8 bg-red-900/50 text-red-500 border border-red-900 px-4 py-1 rounded text-xs hover:bg-red-900 hover:text-white transition-colors"
+      <button
+        onClick={() => window.close()}
+        className="mt-8 bg-[#F87171]/15 text-[#F87171] border border-[#F87171]/40 hover:bg-[#F87171]/25 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors"
       >
-        SELF DESTRUCT
+        Self destruct
       </button>
     </div>
   );
