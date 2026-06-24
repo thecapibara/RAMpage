@@ -13,53 +13,81 @@ export default function BenchmarksView({
   const gpuBusy = gpuBenchMode !== 'NONE';
 
   return (
-    <Panel title="Benchmarks" status={isBenchmarking || gpuBusy ? 'active' : 'idle'}>
-      <div className="mb-6">
-        <div className="text-[11px] uppercase tracking-wide text-[#8B8B92] mb-2">Suite</div>
-        <Segmented
-          options={[
-            { value: 'CPU', label: 'CPU / RAM' },
-            { value: 'GPU', label: 'GPU' },
-          ]}
-          value={benchType}
-          onChange={setBenchType}
-        />
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="lg:col-span-2">
+        <Panel title="Benchmarks" status={isBenchmarking || gpuBusy ? 'active' : 'idle'}>
+          <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+            <Segmented
+              options={[
+                { value: 'CPU', label: 'CPU / RAM' },
+                { value: 'GPU', label: 'GPU' },
+              ]}
+              value={benchType}
+              onChange={setBenchType}
+            />
+            <span className="chip mono">survival suite</span>
+          </div>
+
+          {benchType === 'CPU' ? (
+            <>
+              <div className="label mb-2">High score</div>
+              <div className="metric on text-5xl leading-none mb-3">{cpuHighScore.toLocaleString()}</div>
+              {isBenchmarking && (
+                <div className="mono text-sm text-fox mt-2 mb-6">current: {cpuBenchScore.toLocaleString()}</div>
+              )}
+              {!isBenchmarking ? (
+                <Button variant="primary" icon="Play" onClick={startCpuBenchmark} disabled={gpuBusy}>Run survival</Button>
+              ) : (
+                <Button variant="destructive" icon="Square" onClick={stopCpuBenchmark}>Stop</Button>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="space-y-1 mb-8">
+                {[
+                  { key: 'LIGHT', label: 'Light', score: gpuHighScores.LIGHT },
+                  { key: 'NORMAL', label: 'Normal', score: gpuHighScores.NORMAL },
+                  { key: 'BURNER', label: 'Burner', score: gpuHighScores.BURNER },
+                ].map((row) => (
+                  <div
+                    key={row.key}
+                    className="flex justify-between items-center py-2.5 border-b border-line last:border-0"
+                  >
+                    <span className="label">{row.label}</span>
+                    <span className="mono text-xl font-semibold text-fox">{row.score.toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button variant="primary" onClick={() => runGpuBenchmark('LIGHT')} disabled={isBenchmarking || gpuBusy}>Light</Button>
+                <Button variant="primary" onClick={() => runGpuBenchmark('NORMAL')} disabled={isBenchmarking || gpuBusy}>Normal</Button>
+                <Button variant="primary" onClick={() => runGpuBenchmark('BURNER')} disabled={isBenchmarking || gpuBusy}>Burner</Button>
+              </div>
+            </>
+          )}
+        </Panel>
       </div>
 
-      {benchType === 'CPU' ? (
-        <>
-          <div className="mb-8">
-            <div className="text-[11px] uppercase tracking-wide text-[#8B8B92] mb-1">High score</div>
-            <div className="text-4xl font-mono font-semibold text-[#34D399]">{cpuHighScore}</div>
-            {isBenchmarking && <div className="text-sm text-[#ECECEC] mt-2 font-mono">current: {cpuBenchScore}</div>}
+      <Panel title="High scores">
+        <div className="space-y-1">
+          <div className="flex justify-between items-center py-3 border-b border-line">
+            <span className="label">CPU / RAM</span>
+            <span className="mono text-xl font-bold grad-text">{(cpuHighScore || 0).toLocaleString()}</span>
           </div>
-          {!isBenchmarking ? (
-            <Button variant="primary" icon="Play" onClick={startCpuBenchmark} disabled={gpuBusy}>Run survival</Button>
-          ) : (
-            <Button variant="destructive" icon="Square" onClick={stopCpuBenchmark}>Stop</Button>
-          )}
-        </>
-      ) : (
-        <>
-          <div className="space-y-2 mb-8">
-            {[
-              { key: 'LIGHT', label: 'Light', score: gpuHighScores.LIGHT },
-              { key: 'NORMAL', label: 'Normal', score: gpuHighScores.NORMAL },
-              { key: 'BURNER', label: 'Burner', score: gpuHighScores.BURNER },
-            ].map((row) => (
-              <div key={row.key} className="flex justify-between items-center py-2 border-b border-[#232327] last:border-0">
-                <span className="text-sm text-[#8B8B92] uppercase tracking-wide">{row.label}</span>
-                <span className="text-xl font-mono font-semibold text-[#ECECEC]">{row.score}</span>
-              </div>
-            ))}
+          <div className="flex justify-between items-center py-3 border-b border-line">
+            <span className="label">GPU light</span>
+            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.LIGHT || 0).toLocaleString()}</span>
           </div>
-          <div className="flex flex-col gap-2">
-            <Button variant="primary" onClick={() => runGpuBenchmark('LIGHT')} disabled={isBenchmarking || gpuBusy}>Light</Button>
-            <Button variant="primary" onClick={() => runGpuBenchmark('NORMAL')} disabled={isBenchmarking || gpuBusy}>Normal</Button>
-            <Button variant="primary" onClick={() => runGpuBenchmark('BURNER')} disabled={isBenchmarking || gpuBusy}>Burner</Button>
+          <div className="flex justify-between items-center py-3 border-b border-line">
+            <span className="label">GPU normal</span>
+            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.NORMAL || 0).toLocaleString()}</span>
           </div>
-        </>
-      )}
-    </Panel>
+          <div className="flex justify-between items-center py-3">
+            <span className="label">GPU burner</span>
+            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.BURNER || 0).toLocaleString()}</span>
+          </div>
+        </div>
+      </Panel>
+    </div>
   );
 }

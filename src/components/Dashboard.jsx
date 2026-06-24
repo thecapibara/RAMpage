@@ -710,7 +710,7 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="h-screen w-full flex bg-[#0E0E10] text-[#ECECEC] overflow-hidden font-sans">
+    <div className="h-screen w-full flex overflow-hidden font-sans text-fox relative">
       <Sidebar
         view={view}
         onViewChange={setView}
@@ -719,8 +719,28 @@ export default function Dashboard() {
         onReset={handleEmergencyResetConfirm}
       />
 
-      <main className="flex-1 overflow-y-auto p-8">
-        <div className="max-w-3xl mx-auto">
+      <main className="flex-1 overflow-y-auto p-3">
+        {/* topbar */}
+        <div className="glass rounded-2xl px-5 py-3 mb-4 flex items-center justify-between sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            <h2 className="text-base font-semibold">
+              {view === 'RAM' && 'RAM & CPU'}
+              {view === 'STORAGE' && 'Storage'}
+              {view === 'GPU' && 'GPU'}
+              {view === 'NETWORK' && 'Network'}
+              {view === 'BENCH' && 'Benchmarks'}
+            </h2>
+            <span className="chip flex items-center gap-1.5">
+              {status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-lime shadow-[0_0_8px_#34D399]" />}
+              {status === 'error' && <span className="w-1.5 h-1.5 rounded-full bg-red" />}
+              {status === 'idle' && <span className="w-1.5 h-1.5 rounded-full bg-fox-3" />}
+              <span className="uppercase tracking-wide">{status}</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-2" />
+        </div>
+
+        <div className="pb-6">
           {view === 'RAM' && (
             <RamCpuView
               allocatedMB={allocatedMB}
@@ -819,37 +839,37 @@ export default function Dashboard() {
 
       {/* GPU fullscreen popup (kept inline — tightly coupled to bench state) */}
       {showGpuPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4">
-          <div className="relative w-full max-w-5xl h-[80vh] bg-black border border-[#232327] rounded-xl overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-0/90 p-4">
+          <div className="glass relative w-full max-w-5xl h-[80vh] rounded-xl overflow-hidden flex flex-col">
             {gpuBenchMode !== 'NONE' && (
-              <div className="absolute top-4 left-4 z-20 bg-black/80 backdrop-blur-md border border-[#232327] p-4 rounded-xl text-[#ECECEC] min-w-[200px]">
-                <div className="flex items-center gap-2 mb-2 border-b border-[#232327] pb-2">
-                  <Icons.Trophy size={16} className="text-[#34D399]" />
+              <div className="absolute top-4 left-4 z-20 glass p-4 rounded-xl min-w-[200px]">
+                <div className="flex items-center gap-2 mb-2 border-b border-line pb-2">
+                  <Icons.Trophy size={16} className="text-lime" />
                   <span className="font-semibold text-sm">{gpuBenchMode} test</span>
                 </div>
-                <div className="text-xs font-mono space-y-1 text-[#8B8B92]">
+                <div className="text-xs mono space-y-1 text-fox-2">
                   <div>scene: {gpuMode}</div>
                   <div>res: {gpuResolution}px</div>
-                  <div>overdrive: <span className="text-[#F87171]">x{gpuOverdrive}</span></div>
-                  <div className="text-[#34D399]">stage {gpuBenchStage + 1}/{gpuBenchMode === 'LIGHT' ? LIGHT_SUITE.length : (gpuBenchMode === 'NORMAL' ? NORMAL_SUITE.length : BURNER_SUITE.length)}</div>
+                  <div>overdrive: <span className="text-red">x{gpuOverdrive}</span></div>
+                  <div className="text-lime">stage {gpuBenchStage + 1}/{gpuBenchMode === 'LIGHT' ? LIGHT_SUITE.length : (gpuBenchMode === 'NORMAL' ? NORMAL_SUITE.length : BURNER_SUITE.length)}</div>
                 </div>
                 <div className="mt-3 bg-white/5 rounded-lg p-2 flex justify-between items-end">
                   <div>
-                    <div className="text-[10px] text-[#8B8B92]">avg fps</div>
+                    <div className="text-[10px] text-fox-2">avg fps</div>
                     <div className="text-xl font-semibold">
                       {gpuBenchTimeLeft > 18 ? '…' : (gpuBenchAvgBuffer.slice(4).reduce((a, b) => a + b, 0) / (gpuBenchAvgBuffer.length - 4 || 1)).toFixed(0)}
                     </div>
                   </div>
-                  <div className="text-3xl font-bold">{gpuBenchTimeLeft}</div>
+                  <div className="text-3xl font-bold grad-text">{gpuBenchTimeLeft}</div>
                 </div>
               </div>
             )}
-            <div className="absolute top-4 right-20 z-20 bg-black/70 text-[#34D399] text-xs font-mono font-semibold px-3 py-1.5 rounded backdrop-blur-md border border-[#232327]">
+            <div className="absolute top-4 right-20 z-20 glass text-lime text-xs mono font-semibold px-3 py-1.5 rounded">
               fps: {gpuBenchTimeLeft > 18 && gpuBenchMode !== 'NONE' ? 'warming…' : gpuBenchCurrentFps}
             </div>
             <button
               onClick={() => gpuBenchMode !== 'NONE' ? cancelGpuBenchmark() : setShowGpuPopup(false)}
-              className="absolute top-4 right-4 z-50 bg-[#161618]/80 hover:bg-[#F87171] text-[#ECECEC] p-2 rounded-full backdrop-blur-md transition-colors border border-[#232327]"
+              className="absolute top-4 right-4 z-50 glass hover:!bg-red/25 text-fox p-2 rounded-full transition-colors"
             >
               <Icons.X size={20} />
             </button>
@@ -873,33 +893,38 @@ export default function Dashboard() {
 
       {/* Bench results modal */}
       {showBenchResults && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4">
-          <div className="bg-[#161618] border border-[#34D399]/60 rounded-xl max-w-lg w-full p-6 font-mono">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink-0/90 p-4">
+          <div className="glass rounded-xl max-w-lg w-full p-6" style={{ borderColor: 'rgba(52,211,153,.6)' }}>
             <div className="text-center mb-4">
-              <h2 className="text-xl font-bold text-[#ECECEC]">{showBenchResults} results</h2>
-              <div className="text-4xl text-[#34D399] font-bold mt-2">
+              <h2 className="text-xl font-bold text-fox">{showBenchResults} results</h2>
+              <div className="metric on text-4xl mt-2">
                 {gpuBenchResults.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res / 1024) * r.od), 0).toLocaleString()}
               </div>
-              <div className="text-xs text-[#8B8B92] uppercase mt-1">total score</div>
+              <div className="label mt-1">total score</div>
             </div>
             <div className="max-h-[300px] overflow-y-auto space-y-1 mb-4 pr-2">
               {gpuBenchResults.map((r, i) => {
                 const score = Math.round(r.avgFps * (r.res / 1024) * r.od);
                 return (
-                  <div key={i} className="flex justify-between items-center bg-[#1A1A1E] border border-[#232327] p-2 rounded text-xs">
+                  <div key={i} className="flex justify-between items-center glass-2 p-2 rounded text-xs">
                     <div className="flex flex-col">
-                      <span className="text-[#ECECEC] font-semibold">{r.mode}</span>
-                      <span className="text-[#5A5A62] text-[10px]">{r.res}px • x{r.od} od</span>
+                      <span className="text-fox font-semibold">{r.mode}</span>
+                      <span className="text-fox-3 text-[10px]">{r.res}px • x{r.od} od</span>
                     </div>
                     <div className="text-right">
-                      <div className="text-[#34D399] font-semibold">{score} pts</div>
-                      <div className="text-[#5A5A62] text-[10px]">{r.avgFps.toFixed(0)} fps</div>
+                      <div className="text-lime font-semibold">{score} pts</div>
+                      <div className="text-fox-3 text-[10px]">{r.avgFps.toFixed(0)} fps</div>
                     </div>
                   </div>
                 );
               })}
             </div>
-            <button onClick={() => setShowBenchResults(false)} className="w-full bg-white text-black font-semibold py-3 rounded-lg hover:bg-[#ECECEC] transition-colors">Close</button>
+            <button
+              onClick={() => setShowBenchResults(false)}
+              className="w-full bg-grad-accent text-ink-1 font-semibold py-3 rounded-lg hover:brightness-110 transition-filter"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

@@ -12,17 +12,22 @@ const NAV = [
 
 export default function Sidebar({ view, onViewChange, status, activeViews, onReset }) {
   return (
-    <aside className="w-60 shrink-0 bg-[#0A0A0C] border-r border-[#232327] flex flex-col">
-      {/* Brand */}
-      <div className="px-5 py-5 border-b border-[#232327]">
-        <h1 className="text-lg font-semibold text-[#ECECEC] tracking-wide">
-          <span className="text-[#34D399]">RAM</span>PAGE!
-        </h1>
-        <div className="text-[10px] text-[#5A5A62] uppercase tracking-[0.2em] mt-0.5">stress suite</div>
+    <aside className="glass w-60 shrink-0 m-3 mr-0 rounded-xl flex flex-col overflow-hidden">
+      <div className="px-4 py-4 border-b border-line">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center border border-line bg-ink-1">
+            <Icons.Zap size={16} className="text-lime" />
+          </div>
+          <div className="flex flex-col">
+            <h1 className="font-display text-[14px] font-bold tracking-[0.08em] leading-none">
+              <span className="text-lime">RAM</span><span className="text-fox">PAGE</span><span className="text-red">!</span>
+            </h1>
+            <div className="mono text-[9px] text-fox-3 mt-1.5 tracking-tight">v4.5 • Full Stress Suite • JustGL</div>
+          </div>
+        </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 py-3">
+      <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto">
         {NAV.map((item) => {
           const Icon = Icons[item.icon];
           const isActive = view === item.view;
@@ -32,13 +37,13 @@ export default function Sidebar({ view, onViewChange, status, activeViews, onRes
               key={item.view}
               type="button"
               onClick={() => onViewChange(item.view)}
-              className={`w-full flex items-center gap-3 px-5 py-2.5 text-sm transition-colors border-l-2 ${
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-[#34D399]/5 text-[#ECECEC] border-[#34D399]'
-                  : 'text-[#8B8B92] hover:text-[#ECECEC] hover:bg-[#161618] border-transparent'
+                  ? 'bg-white/[.05] text-fox'
+                  : 'text-fox-2 hover:text-fox hover:bg-white/[.03]'
               }`}
             >
-              <Icon size={16} />
+              <Icon size={16} className={isActive ? 'text-lime' : ''} />
               <span className="flex-1 text-left">{item.label}</span>
               {isRunning && <StatusDot state="active" />}
             </button>
@@ -46,18 +51,18 @@ export default function Sidebar({ view, onViewChange, status, activeViews, onRes
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-[#232327] space-y-3">
-        <div className="flex items-center gap-2 text-xs text-[#8B8B92]">
+      <div className="p-3 border-t border-line space-y-2.5">
+        <div className="flex items-center gap-2 px-1 text-xs">
           <StatusDot state={status} />
-          <span className="uppercase tracking-wide">{status}</span>
+          <span className="uppercase tracking-wide font-semibold text-fox-2">{status}</span>
         </div>
         <button
           type="button"
           onClick={onReset}
-          className="text-xs text-[#5A5A62] hover:text-[#F87171] transition-colors"
+          className="w-full flex items-center justify-center gap-2 rounded-md px-3 py-2 text-xs font-medium bg-white/[.03] border border-line text-fox-2 hover:text-red hover:border-red/40 transition-colors"
         >
-          Reset all…
+          <Icons.RotateCcw size={13} />
+          Emergency reset
         </button>
       </div>
     </aside>

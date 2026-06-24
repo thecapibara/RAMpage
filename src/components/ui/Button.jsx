@@ -2,9 +2,10 @@ import React from 'react';
 import Icons from '../icons';
 
 const VARIANTS = {
-  primary: 'bg-white text-black hover:bg-[#ECECEC] font-semibold',
-  destructive: 'bg-[#F87171]/15 text-[#F87171] border border-[#F87171]/40 hover:bg-[#F87171]/25',
-  secondary: 'bg-transparent border border-[#232327] text-[#8B8B92] hover:border-[#3A3A42] hover:text-[#ECECEC]',
+  primary: 'bg-fox text-ink-1 font-semibold hover:bg-white',
+  destructive: 'bg-red/15 text-red border border-red/40 hover:bg-red/25',
+  secondary: 'bg-white/[.03] border border-line text-fox-2 hover:text-fox hover:border-line-strong',
+  ghost: 'text-fox-2 hover:text-fox',
 };
 
 export default function Button({ variant = 'primary', icon, children, className = '', ...props }) {

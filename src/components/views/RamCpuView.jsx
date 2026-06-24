@@ -21,40 +21,47 @@ export default function RamCpuView({
 
   return (
     <Panel title="RAM & CPU" status={running ? 'active' : 'idle'}>
-      {/* Headline + chart */}
+      {/* headline */}
       <div className="flex items-end justify-between mb-6">
         <div>
-          <div className="text-[11px] uppercase tracking-wide text-[#8B8B92] mb-1">Allocated</div>
-          <div className={`text-4xl font-mono font-semibold ${running ? 'text-[#34D399]' : 'text-[#ECECEC]'}`}>
-            {allocatedMB.toLocaleString()} <span className="text-base text-[#5A5A62]">MB</span>
+          <div className="label mb-2">Allocated</div>
+          <div className={`metric ${running ? 'on' : ''} text-6xl leading-none`}>
+            {allocatedMB.toLocaleString()} <span style={{ fontSize: '1.1rem', WebkitTextFillColor: '#5E5E78', background: 'none', color: '#5E5E78' }}>MB</span>
+          </div>
+          <div className="flex gap-3 mt-3 text-xs text-fox-3">
+            <span>target: <span className="mono text-fox-2">{targetMB}</span></span>
+            {cpuMode !== 'HASH' && <span>cpu: <span className="mono text-lime">{cpuLoad}%</span></span>}
           </div>
         </div>
       </div>
-      <div className="h-40 mb-6">
+
+      {/* chart */}
+      <div className="h-36 mb-6">
         <ErrorBoundary>
-          <SimpleChart data={chartDataRAM} max={MAX_LIMIT} color="#34D399" label="RAM Usage" unit="MB" />
+          <SimpleChart data={chartDataRAM} max={MAX_LIMIT} label="RAM Usage" unit="MB" />
         </ErrorBoundary>
       </div>
 
-      {/* Mode switch */}
-      <div className="mb-6">
-        <div className="text-[11px] uppercase tracking-wide text-[#8B8B92] mb-2">Mode</div>
-        <Segmented
-          options={[
-            { value: 'STANDARD', label: 'Standard' },
-            { value: 'HASH', label: 'Hash stress' },
-            { value: 'MINIONS', label: isMobile ? 'Minions (PC only)' : 'Minions' },
-          ]}
-          value={cpuMode}
-          onChange={setCpuMode}
-        />
-      </div>
-
-      {cpuMode !== 'MINIONS' ? (
-        <>
-          <div className="mb-6">
-            <div className="text-[11px] uppercase tracking-wide text-[#8B8B92] mb-2">Allocation pattern</div>
+      {/* mode + pattern */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+        <div>
+          <div className="label mb-2">CPU mode</div>
+          <Segmented
+            className="w-full"
+            options={[
+              { value: 'STANDARD', label: 'Standard' },
+              { value: 'HASH', label: 'Hash stress' },
+              { value: 'MINIONS', label: isMobile ? 'Minions (PC only)' : 'Minions' },
+            ]}
+            value={cpuMode}
+            onChange={setCpuMode}
+          />
+        </div>
+        {cpuMode !== 'MINIONS' && (
+          <div>
+            <div className="label mb-2">Allocation pattern</div>
             <Segmented
+              className="w-full"
               options={[
                 { value: 'LINEAR', label: 'Linear' },
                 { value: 'CHAOS', label: 'Chaos' },
@@ -65,26 +72,30 @@ export default function RamCpuView({
               disabled={isAllocating}
             />
           </div>
+        )}
+      </div>
 
-          <div className="space-y-4 mb-8">
+      {cpuMode !== 'MINIONS' ? (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
             <Slider label="RAM target" value={targetMB} min={500} max={MAX_LIMIT} step={100} suffix=" MB" onChange={setTargetMB} disabled={busy} />
             {cpuMode === 'HASH' ? (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className="text-[#8B8B92]">Hash intensity</span>
-                  <span className="font-mono text-[#34D399]">MAX</span>
+              <div className="space-y-2">
+                <div className="flex justify-between items-baseline">
+                  <span className="label">Hash intensity</span>
+                  <span className="mono text-sm text-lime">MAX</span>
                 </div>
-                <div className="w-full h-1 bg-[#232327] rounded-lg overflow-hidden">
-                  <div className="h-full w-full bg-[#34D399] animate-pulse" />
+                <div className="w-full h-1.5 rounded-md bg-grad-accent overflow-hidden">
+                  <div className="h-full w-full animate-pulse-soft" />
                 </div>
               </div>
             ) : (
-              <Slider label="CPU load" value={cpuLoad} min={0} max={100} step={10} suffix="%" onChange={setCpuLoad} disabled={busy} />
+              <Slider label="CPU load" value={cpuLoad} min={0} max={100} step={10} suffix="%" onChange={setCpuLoad} disabled={busy} valueClassName="text-lime" />
             )}
           </div>
 
           {!isAllocating ? (
-            <Button variant="primary" icon="Play" onClick={allocateMemory} disabled={busy}>
+            <Button variant="primary" icon="Play" onClick={() => allocateMemory()} disabled={busy}>
               {cpuMode === 'HASH' ? 'Start hashing' : 'Start load'}
             </Button>
           ) : (
@@ -95,7 +106,6 @@ export default function RamCpuView({
         </>
       ) : (
         <MinionsSub
-          isMobile={isMobile}
           minionSize={minionSize}
           minionCount={minionCount}
           minions={minions}
@@ -114,23 +124,30 @@ export default function RamCpuView({
 function MinionsSub({ minionSize, minionCount, minions, minionWebRTC, setMinionSize, setMinionCount, setMinionWebRTC, spawnMinions, handleKillMinionsConfirm }) {
   return (
     <>
-      <div className="p-3 mb-6 rounded-lg bg-[#F87171]/10 border border-[#F87171]/30 text-xs text-[#ECECEC] leading-relaxed">
-        <strong className="text-[#F87171]">Warning:</strong> Spawns separate windows to bypass browser memory limits. Desktop only. Allow popups if blocked.
+      <div
+        className="p-3 mb-6 rounded-lg text-xs text-fox leading-relaxed"
+        style={{ background: 'rgba(248,113,113,.1)', border: '1px solid rgba(248,113,113,.3)' }}
+      >
+        <strong className="text-red">Warning:</strong> Spawns separate windows to bypass browser memory limits. Desktop only. Allow popups if blocked.
       </div>
-      <div className="space-y-4 mb-6">
+      <div className="space-y-5 mb-6">
         <Slider label="Window size" value={minionSize} min={256} max={2048} step={128} suffix=" MB" onChange={setMinionSize} />
         <div>
           <Slider label="Count" value={minionCount} min={1} max={20} step={1} suffix=" wins" onChange={setMinionCount} />
-          <div className="text-right text-[10px] text-[#5A5A62] mt-1">Total: {(minionSize * minionCount / 1024).toFixed(1)} GB</div>
+          <div className="text-right text-[10px] text-fox-3 mt-1">Total: {(minionSize * minionCount / 1024).toFixed(1)} GB</div>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer select-none">
+        <label
+          className="flex items-center gap-2 cursor-pointer select-none p-2.5 rounded-lg border border-line hover:border-line-strong transition-colors"
+          style={{ background: 'rgba(255,255,255,.025)' }}
+        >
           <input
             type="checkbox"
             checked={minionWebRTC}
             onChange={(e) => setMinionWebRTC(e.target.checked)}
-            className="w-4 h-4 accent-[#34D399] bg-[#1A1A1E] border-[#232327] rounded"
+            className="w-4 h-4"
+            style={{ accentColor: '#34D399' }}
           />
-          <span className="text-xs text-[#8B8B92] flex items-center gap-1">
+          <span className="text-xs text-fox-2 flex items-center gap-1.5">
             <Icons.Wifi size={12} /> Enable WebRTC storm
           </span>
         </label>
