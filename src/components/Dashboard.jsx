@@ -12,6 +12,7 @@ import GpuView from './views/GpuView';
 import NetworkView from './views/NetworkView';
 import BenchmarksView from './views/BenchmarksView';
 import WebRtcView from './views/WebRtcView';
+import FileHailView from './views/FileHailView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -62,6 +63,14 @@ export default function Dashboard() {
   const [rtcInterval, setRtcInterval] = useState(5);
   const [rtcMedia, setRtcMedia] = useState(false);
   const rtcRefs = useRef({ pairs: [], intervals: [], stream: null, sentBytes: 0, recvBytes: 0, statsTimer: null });
+
+  // Filesystem Hail Mary State
+  const [hailActive, setHailActive] = useState(false);
+  const [hailStats, setHailStats] = useState({ writtenMB: 0, speed: 0, writes: 0, errors: 0 });
+  const [hailChunk, setHailChunk] = useState(32);
+  const [hailPattern, setHailPattern] = useState('RANDOM');
+  const [hailUnsupported, setHailUnsupported] = useState(false);
+  const hailRefs = useRef({ handle: null, writable: null, loop: null, cancel: false, lastBytes: 0, lastTime: 0 });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -146,6 +155,9 @@ export default function Dashboard() {
       if (r.statsTimer) clearInterval(r.statsTimer);
       r.pairs.forEach((pc) => { try { pc.close(); } catch {} });
       if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
+
+      // Cleanup Filesystem Hail Mary loop
+      hailRefs.current.cancel = true;
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -492,11 +504,121 @@ export default function Dashboard() {
     addLog(`WebRTC storm stopped. Burned: ${burned.toFixed(1)} MB`);
   };
 
+  // --- FILESYSTEM HAIL MARY ---
+  const startHailMary = async () => {
+    if (hailActive) return;
+    if (typeof window.showSaveFilePicker !== 'function') {
+      setHailUnsupported(true);
+      addLog(`Filesystem Hail Mary: File System Access API unsupported`, 'error');
+      return;
+    }
+    let handle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: `rampage_hail_${Date.now()}.bin`,
+        types: [{ description: 'Raw binary', accept: { 'application/octet-stream': ['.bin'] } }],
+      });
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        addLog(`Filesystem Hail Mary: file picker cancelled`);
+      } else {
+        addLog(`Filesystem Hail Mary: picker error: ${e.message}`, 'error');
+      }
+      return;
+    }
+
+    setHailActive(true);
+    setHailStats({ writtenMB: 0, speed: 0, writes: 0, errors: 0 });
+    hailRefs.current.cancel = false;
+    hailRefs.current.handle = handle;
+    addLog(`Filesystem Hail Mary: target = "${handle.name}"`, 'success');
+
+    const chunkBytes = hailChunk * 1024 * 1024;
+    const chunk = new Uint8Array(chunkBytes);
+    if (hailPattern === 'ZEROS') {
+      chunk.fill(0);
+    } else if (hailPattern === 'RANDOM') {
+      for (let i = 0; i < chunkBytes; i++) chunk[i] = (Math.random() * 256) | 0;
+    } else {
+      // COMPRESS — repeating long runs, heavy on CPU if FS compresses
+      const run = 4096;
+      for (let i = 0; i < chunkBytes; i += run) {
+        const v = (Math.random() * 256) | 0;
+        chunk.fill(v, i, Math.min(i + run, chunkBytes));
+      }
+    }
+
+    let writable;
+    try {
+      writable = await handle.createWritable();
+    } catch (e) {
+      addLog(`Filesystem Hail Mary: createWritable failed: ${e.message}`, 'error');
+      setHailActive(false);
+      return;
+    }
+    hailRefs.current.writable = writable;
+
+    let total = 0;
+    let writes = 0;
+    let errors = 0;
+    let lastBytes = 0;
+    let lastTime = performance.now();
+    hailRefs.current.lastBytes = 0;
+    hailRefs.current.lastTime = lastTime;
+
+    const loop = async () => {
+      while (!hailRefs.current.cancel) {
+        try {
+          await writable.write(chunk);
+          total += chunkBytes;
+          writes += 1;
+        } catch (e) {
+          errors += 1;
+          addLog(`Filesystem Hail Mary: write error: ${e.message}`, 'error');
+          if (errors >= 3) {
+            addLog(`Filesystem Hail Mary: aborting after ${errors} errors`, 'error');
+            break;
+          }
+        }
+        // throttle stat refresh
+        const now = performance.now();
+        if (now - hailRefs.current.lastTime > 250) {
+          const dt = (now - hailRefs.current.lastTime) / 1000;
+          const dBytes = total - hailRefs.current.lastBytes;
+          const speedMBs = dt > 0 ? dBytes / (1024 * 1024) / dt : 0;
+          setHailStats({
+            writtenMB: total / (1024 * 1024),
+            speed: speedMBs,
+            writes,
+            errors,
+          });
+          hailRefs.current.lastBytes = total;
+          hailRefs.current.lastTime = now;
+        }
+        // yield to UI
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      try { await writable.close(); } catch {}
+      const finalMB = total / (1024 * 1024);
+      setHailStats((s) => ({ ...s, writtenMB: finalMB, writes, errors }));
+      addLog(`Filesystem Hail Mary done. Written: ${finalMB.toFixed(0)} MB (${writes} writes)`, 'success');
+    };
+    hailRefs.current.loop = loop;
+    loop();
+  };
+
+  const stopHailMary = () => {
+    hailRefs.current.cancel = true;
+    setHailActive(false);
+    addLog(`Filesystem Hail Mary stopping…`);
+  };
+
   const clearAll = useCallback(() => {
       stopRAM();
       clearStorage();
       stopNetworkStress();
       stopRtcStorm();
+      stopHailMary();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -819,7 +941,7 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive;
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || hailActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
@@ -827,6 +949,7 @@ export default function Dashboard() {
     (gpuActive || vramActive) && 'GPU',
     netActive && 'NETWORK',
     rtcActive && 'WEBRTC',
+    hailActive && 'FILES',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -855,6 +978,7 @@ export default function Dashboard() {
               {view === 'GPU' && 'GPU'}
               {view === 'NETWORK' && 'Network'}
               {view === 'WEBRTC' && 'WebRTC'}
+              {view === 'FILES' && 'Disk Hail'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -959,6 +1083,20 @@ export default function Dashboard() {
               setRtcMedia={setRtcMedia}
               startRtcStorm={startRtcStorm}
               stopRtcStorm={stopRtcStorm}
+            />
+          )}
+
+          {view === 'FILES' && (
+            <FileHailView
+              hailActive={hailActive}
+              hailStats={hailStats}
+              hailChunk={hailChunk}
+              hailPattern={hailPattern}
+              hailUnsupported={hailUnsupported}
+              setHailChunk={setHailChunk}
+              setHailPattern={setHailPattern}
+              startHailMary={startHailMary}
+              stopHailMary={stopHailMary}
             />
           )}
 
