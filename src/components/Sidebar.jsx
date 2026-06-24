@@ -7,6 +7,7 @@ const NAV = [
   { view: 'STORAGE', label: 'Storage',    icon: 'HardDrive' },
   { view: 'GPU',     label: 'GPU',        icon: 'Monitor' },
   { view: 'NETWORK', label: 'Network',    icon: 'Wifi' },
+  { view: 'WEBRTC',  label: 'WebRTC',     icon: 'Share2' },
   { view: 'BENCH',   label: 'Benchmarks', icon: 'Trophy' },
 ];
 

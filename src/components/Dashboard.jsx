@@ -11,6 +11,7 @@ import StorageView from './views/StorageView';
 import GpuView from './views/GpuView';
 import NetworkView from './views/NetworkView';
 import BenchmarksView from './views/BenchmarksView';
+import WebRtcView from './views/WebRtcView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -50,8 +51,17 @@ export default function Dashboard() {
 
   // Network Stress State
   const [netActive, setNetActive] = useState(false);
-  const [netStats, setNetStats] = useState({ speed: 0, total: 0 }); 
+  const [netStats, setNetStats] = useState({ speed: 0, total: 0 });
   const networkWorkerRef = useRef(null);
+
+  // WebRTC Mesh Storm State
+  const [rtcActive, setRtcActive] = useState(false);
+  const [rtcStats, setRtcStats] = useState({ open: 0, channels: 0, mbps: 0, totalMB: 0 });
+  const [rtcPeers, setRtcPeers] = useState(8);
+  const [rtcPayload, setRtcPayload] = useState(16);
+  const [rtcInterval, setRtcInterval] = useState(5);
+  const [rtcMedia, setRtcMedia] = useState(false);
+  const rtcRefs = useRef({ pairs: [], intervals: [], stream: null, sentBytes: 0, recvBytes: 0, statsTimer: null });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -129,6 +139,13 @@ export default function Dashboard() {
       if (networkWorkerRef.current) {
         networkWorkerRef.current.terminate();
       }
+
+      // Cleanup WebRTC storm
+      const r = rtcRefs.current;
+      r.intervals.forEach((iv) => clearInterval(iv));
+      if (r.statsTimer) clearInterval(r.statsTimer);
+      r.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+      if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -360,18 +377,126 @@ export default function Dashboard() {
 
   const stopNetworkStress = () => {
       if (networkWorkerRef.current) {
-          networkWorkerRef.current.terminate(); 
+          networkWorkerRef.current.terminate();
           networkWorkerRef.current = null;
       }
       setNetActive(false);
-      setNetStats(prev => ({ ...prev, speed: 0 })); 
+      setNetStats(prev => ({ ...prev, speed: 0 }));
       addLog(`Network Stress Stopped. Burned: ${netStats.total.toFixed(0)} MB`);
+  };
+
+  // --- WEBRTC MESH STORM ---
+  const startRtcStorm = async () => {
+    if (rtcActive) return;
+    const refs = rtcRefs.current;
+    refs.pairs = [];
+    refs.intervals = [];
+    refs.sentBytes = 0;
+    refs.recvBytes = 0;
+    refs.stream = null;
+
+    setRtcActive(true);
+    setRtcStats({ open: 0, channels: 0, mbps: 0, totalMB: 0 });
+    addLog(`WebRTC: building ${rtcPeers} peer-pairs…`);
+
+    // optional media
+    if (rtcMedia) {
+      try {
+        refs.stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+        addLog(`WebRTC: camera stream acquired for encoding load`, 'success');
+      } catch (e) {
+        addLog(`WebRTC: getUserMedia denied — running data-only`, 'warning');
+      }
+    }
+
+    const payload = new Uint8Array(rtcPayload * 1024);
+    // fill with pseudo-random to defeat compression inside DTLS
+    for (let i = 0; i < payload.length; i++) payload[i] = (Math.random() * 256) | 0;
+    let openCount = 0;
+    let channelCount = 0;
+
+    for (let i = 0; i < rtcPeers; i++) {
+      const pc1 = new RTCPeerConnection();
+      const pc2 = new RTCPeerConnection();
+      refs.pairs.push(pc1, pc2);
+
+      pc1.onicecandidate = (e) => e.candidate && pc2.addIceCandidate(e.candidate).catch(() => {});
+      pc2.onicecandidate = (e) => e.candidate && pc1.addIceCandidate(e.candidate).catch(() => {});
+
+      // media sender
+      if (refs.stream) {
+        try {
+          refs.stream.getTracks().forEach((t) => pc1.addTrack(t, refs.stream));
+        } catch {}
+        pc2.ontrack = () => { /* receive & discard — still burns decode */ };
+      }
+
+      const dc = pc1.createDataChannel('storm', { ordered: false, maxRetransmits: 0 });
+      dc.binaryType = 'arraybuffer';
+      dc.onopen = () => {
+        openCount += 2;
+        channelCount += 1;
+        setRtcStats((s) => ({ ...s, open: openCount, channels: channelCount }));
+        const iv = setInterval(() => {
+          if (dc.readyState === 'open') {
+            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch {}
+          }
+        }, rtcInterval);
+        refs.intervals.push(iv);
+      };
+      dc.onmessage = (ev) => { refs.recvBytes += ev.data.byteLength; };
+
+      try {
+        const offer = await pc1.createOffer();
+        await pc1.setLocalDescription(offer);
+        await pc2.setRemoteDescription(offer);
+        const answer = await pc2.createAnswer();
+        await pc2.setLocalDescription(answer);
+        await pc1.setRemoteDescription(answer);
+      } catch (e) {
+        addLog(`WebRTC: pair ${i} failed: ${e.message}`, 'warning');
+      }
+    }
+
+    // stats sampler
+    let lastSent = 0;
+    let lastTime = performance.now();
+    refs.statsTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      const dBytes = refs.sentBytes - lastSent;
+      const mbps = dt > 0 ? (dBytes * 8) / (1024 * 1024) / dt : 0;
+      lastSent = refs.sentBytes;
+      lastTime = now;
+      const totalMB = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
+      setRtcStats((s) => ({ ...s, mbps, totalMB }));
+    }, 500);
+
+    addLog(`WebRTC mesh storm started. Targeting ${rtcPeers} open DCs.`, 'success');
+  };
+
+  const stopRtcStorm = () => {
+    const refs = rtcRefs.current;
+    refs.intervals.forEach((iv) => clearInterval(iv));
+    refs.intervals = [];
+    if (refs.statsTimer) { clearInterval(refs.statsTimer); refs.statsTimer = null; }
+    refs.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+    refs.pairs = [];
+    if (refs.stream) { refs.stream.getTracks().forEach((t) => t.stop()); refs.stream = null; }
+    const burned = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
+    setRtcActive(false);
+    setRtcStats((s) => ({ ...s, open: 0, channels: 0, mbps: 0 }));
+    addLog(`WebRTC storm stopped. Burned: ${burned.toFixed(1)} MB`);
   };
 
   const clearAll = useCallback(() => {
       stopRAM();
       clearStorage();
-      stopNetworkStress(); 
+      stopNetworkStress();
+      stopRtcStorm();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -694,13 +819,14 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE';
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
     isFillingStorage && 'STORAGE',
     (gpuActive || vramActive) && 'GPU',
     netActive && 'NETWORK',
+    rtcActive && 'WEBRTC',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -728,6 +854,7 @@ export default function Dashboard() {
               {view === 'STORAGE' && 'Storage'}
               {view === 'GPU' && 'GPU'}
               {view === 'NETWORK' && 'Network'}
+              {view === 'WEBRTC' && 'WebRTC'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -815,6 +942,23 @@ export default function Dashboard() {
               netStats={netStats}
               runNetworkStress={runNetworkStress}
               stopNetworkStress={stopNetworkStress}
+            />
+          )}
+
+          {view === 'WEBRTC' && (
+            <WebRtcView
+              rtcActive={rtcActive}
+              rtcStats={rtcStats}
+              rtcPeers={rtcPeers}
+              rtcPayload={rtcPayload}
+              rtcInterval={rtcInterval}
+              rtcMedia={rtcMedia}
+              setRtcPeers={setRtcPeers}
+              setRtcPayload={setRtcPayload}
+              setRtcInterval={setRtcInterval}
+              setRtcMedia={setRtcMedia}
+              startRtcStorm={startRtcStorm}
+              stopRtcStorm={stopRtcStorm}
             />
           )}
 
