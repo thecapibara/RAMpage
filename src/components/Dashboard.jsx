@@ -12,7 +12,7 @@ import GpuView from './views/GpuView';
 import NetworkView from './views/NetworkView';
 import BenchmarksView from './views/BenchmarksView';
 import WebRtcView from './views/WebRtcView';
-import FileHailView from './views/FileHailView';
+import IndexedDbView from './views/IndexedDbView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -64,14 +64,12 @@ export default function Dashboard() {
   const [rtcMedia, setRtcMedia] = useState(false);
   const rtcRefs = useRef({ pairs: [], intervals: [], stream: null, sentBytes: 0, recvBytes: 0, statsTimer: null });
 
-  // Filesystem Hail Mary State
-  const [hailActive, setHailActive] = useState(false);
-  const [hailStats, setHailStats] = useState({ writtenMB: 0, speed: 0, writes: 0, errors: 0 });
-  const [hailChunk, setHailChunk] = useState(32);
-  const [hailPattern, setHailPattern] = useState('RANDOM');
-  const [hailUnsupported, setHailUnsupported] = useState(false);
-  const [hailReason, setHailReason] = useState(null);
-  const hailRefs = useRef({ handle: null, writable: null, loop: null, cancel: false, lastBytes: 0, lastTime: 0 });
+  // IndexedDB Flood State
+  const [idbActive, setIdbActive] = useState(false);
+  const [idbStats, setIdbStats] = useState({ storedMB: 0, objects: 0, speed: 0, openStores: 0 });
+  const [idbChunk, setIdbChunk] = useState(8);
+  const [idbStores, setIdbStores] = useState(5);
+  const idbRefs = useRef({ db: null, loop: null, cancel: false, bytes: 0, objects: 0, lastBytes: 0, lastTime: 0, statsTimer: null });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -157,8 +155,9 @@ export default function Dashboard() {
       r.pairs.forEach((pc) => { try { pc.close(); } catch {} });
       if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
 
-      // Cleanup Filesystem Hail Mary loop
-      hailRefs.current.cancel = true;
+      // Cleanup IndexedDB flood loop
+      if (idbRefs.current.statsTimer) clearInterval(idbRefs.current.statsTimer);
+      idbRefs.current.cancel = true;
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -197,31 +196,6 @@ export default function Dashboard() {
   useEffect(() => {
     const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     setIsMobile(checkMobile);
-  }, []);
-
-  // File System Access API capability check + reason diagnosis
-  useEffect(() => {
-    const ua = navigator.userAgent;
-    const isBrave = /Brave/.test(ua) || navigator.brave !== undefined;
-    const isFirefox = /Firefox/.test(ua);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
-    const hasApi = typeof window.showSaveFilePicker === 'function';
-    const secure = window.isSecureContext;
-
-    let unsupported = false;
-    let reason = null;
-    if (isFirefox || isSafari || !hasApi) {
-      unsupported = true;
-      reason = 'unsupported-browser';
-    } else if (!secure) {
-      unsupported = true;
-      reason = 'insecure-context';
-    } else if (isBrave) {
-      // brave is supported but often gated behind shields
-      reason = 'brave-shields';
-    }
-    setHailUnsupported(unsupported);
-    setHailReason(reason);
   }, []);
 
   // Force Storage UI update loop
@@ -530,116 +504,124 @@ export default function Dashboard() {
     addLog(`WebRTC storm stopped. Burned: ${burned.toFixed(1)} MB`);
   };
 
-  // --- FILESYSTEM HAIL MARY ---
-  const startHailMary = async () => {
-    if (hailActive) return;
-    if (typeof window.showSaveFilePicker !== 'function') {
-      setHailUnsupported(true);
-      addLog(`Filesystem Hail Mary: File System Access API unsupported`, 'error');
-      return;
-    }
-    let handle;
-    try {
-      handle = await window.showSaveFilePicker({
-        suggestedName: `rampage_hail_${Date.now()}.bin`,
-        types: [{ description: 'Raw binary', accept: { 'application/octet-stream': ['.bin'] } }],
-      });
-    } catch (e) {
-      if (e && e.name === 'AbortError') {
-        addLog(`Filesystem Hail Mary: file picker cancelled`);
-      } else if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
-        setHailReason('brave-shields');
-        addLog(`Filesystem Hail Mary: permission denied — check browser shields/file-access settings`, 'error');
-      } else {
-        addLog(`Filesystem Hail Mary: picker error: ${e.message}`, 'error');
-      }
-      return;
-    }
+  // --- INDEXEDDB FLOOD ---
+  const startIdbFlood = async () => {
+    if (idbActive) return;
+    const r = idbRefs.current;
+    r.cancel = false;
+    r.bytes = 0;
+    r.objects = 0;
+    r.lastBytes = 0;
+    r.lastTime = performance.now();
 
-    setHailActive(true);
-    setHailStats({ writtenMB: 0, speed: 0, writes: 0, errors: 0 });
-    hailRefs.current.cancel = false;
-    hailRefs.current.handle = handle;
-    addLog(`Filesystem Hail Mary: target = "${handle.name}"`, 'success');
+    // Open / upgrade database with N parallel object stores
+    const req = indexedDB.open('rampage_idb', Date.now());
+    await new Promise((resolve, reject) => {
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        for (let i = 0; i < idbStores; i++) {
+          if (!db.objectStoreNames.contains(`s${i}`)) db.createObjectStore(`s${i}`, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }).then((db) => { r.db = db; }).catch((e) => {
+      addLog(`IndexedDB: open failed: ${e.message}`, 'error');
+    });
 
-    const chunkBytes = hailChunk * 1024 * 1024;
-    const chunk = new Uint8Array(chunkBytes);
-    if (hailPattern === 'ZEROS') {
-      chunk.fill(0);
-    } else if (hailPattern === 'RANDOM') {
-      for (let i = 0; i < chunkBytes; i++) chunk[i] = (Math.random() * 256) | 0;
-    } else {
-      // COMPRESS — repeating long runs, heavy on CPU if FS compresses
-      const run = 4096;
-      for (let i = 0; i < chunkBytes; i += run) {
-        const v = (Math.random() * 256) | 0;
-        chunk.fill(v, i, Math.min(i + run, chunkBytes));
-      }
-    }
+    if (!r.db) return;
 
-    let writable;
-    try {
-      writable = await handle.createWritable();
-    } catch (e) {
-      addLog(`Filesystem Hail Mary: createWritable failed: ${e.message}`, 'error');
-      setHailActive(false);
-      return;
-    }
-    hailRefs.current.writable = writable;
+    setIdbActive(true);
+    setIdbStats({ storedMB: 0, objects: 0, speed: 0, openStores: idbStores });
+    addLog(`IndexedDB flood started — ${idbStores} stores × ${idbChunk}MB blobs`, 'success');
 
-    let total = 0;
-    let writes = 0;
-    let errors = 0;
-    let lastBytes = 0;
-    let lastTime = performance.now();
-    hailRefs.current.lastBytes = 0;
-    hailRefs.current.lastTime = lastTime;
+    // Build a pseudo-random blob once per chunk (Uint8Array -> Blob)
+    const chunkBytes = idbChunk * 1024 * 1024;
+    const makeBlob = () => {
+      const buf = new Uint8Array(chunkBytes);
+      for (let i = 0; i < chunkBytes; i += 4096) buf.fill((Math.random()*256)|0, i, Math.min(i+4096, chunkBytes));
+      return new Blob([buf], { type: 'application/octet-stream' });
+    };
 
+    let keyCounter = 0;
+    let storeIdx = 0;
+
+    // Stats sampler
+    if (r.statsTimer) clearInterval(r.statsTimer);
+    r.statsTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - r.lastTime) / 1000;
+      const dBytes = r.bytes - r.lastBytes;
+      const speed = dt > 0 ? dBytes / (1024 * 1024) / dt : 0;
+      r.lastBytes = r.bytes;
+      r.lastTime = now;
+      setIdbStats((s) => ({
+        ...s,
+        storedMB: r.bytes / (1024 * 1024),
+        objects: r.objects,
+        speed,
+      }));
+    }, 500);
+
+    // sequential async puts across rotating stores
     const loop = async () => {
-      while (!hailRefs.current.cancel) {
+      while (!r.cancel) {
+        const blob = makeBlob();
+        const storeName = `s${storeIdx}`;
+        storeIdx = (storeIdx + 1) % idbStores;
+        const key = keyCounter++;
         try {
-          await writable.write(chunk);
-          total += chunkBytes;
-          writes += 1;
+          const tx = r.db.transaction(storeName, 'readwrite');
+          const store = tx.objectStore(storeName);
+          await new Promise((resolve, reject) => {
+            const q = store.put({ id: key, blob, ts: Date.now() });
+            q.onsuccess = () => resolve();
+            q.onerror = () => reject(q.error);
+          });
+          r.bytes += chunkBytes;
+          r.objects += 1;
         } catch (e) {
-          errors += 1;
-          addLog(`Filesystem Hail Mary: write error: ${e.message}`, 'error');
-          if (errors >= 3) {
-            addLog(`Filesystem Hail Mary: aborting after ${errors} errors`, 'error');
-            break;
+          if (e && e.name === 'QuotaExceededError') {
+            addLog(`IndexedDB: QuotaExceededError — flooded ${r.objects} objects; clearing database`, 'warning');
+            r.cancel = true;
+            await clearIdbDatabase();
+            setIdbStats({ storedMB: 0, objects: 0, speed: 0, openStores: 0 });
+            setIdbActive(false);
+            return;
+          } else {
+            addLog(`IndexedDB: put error: ${e.message}`, 'error');
+            await new Promise((res) => setTimeout(res, 200));
           }
         }
-        // throttle stat refresh
-        const now = performance.now();
-        if (now - hailRefs.current.lastTime > 250) {
-          const dt = (now - hailRefs.current.lastTime) / 1000;
-          const dBytes = total - hailRefs.current.lastBytes;
-          const speedMBs = dt > 0 ? dBytes / (1024 * 1024) / dt : 0;
-          setHailStats({
-            writtenMB: total / (1024 * 1024),
-            speed: speedMBs,
-            writes,
-            errors,
-          });
-          hailRefs.current.lastBytes = total;
-          hailRefs.current.lastTime = now;
-        }
-        // yield to UI
-        await new Promise((r) => setTimeout(r, 0));
+        yieldToUI();
+        await new Promise((res) => setTimeout(res, 0));
       }
-      try { await writable.close(); } catch {}
-      const finalMB = total / (1024 * 1024);
-      setHailStats((s) => ({ ...s, writtenMB: finalMB, writes, errors }));
-      addLog(`Filesystem Hail Mary done. Written: ${finalMB.toFixed(0)} MB (${writes} writes)`, 'success');
     };
-    hailRefs.current.loop = loop;
+
+    const yieldToUI = () => {};
     loop();
   };
 
-  const stopHailMary = () => {
-    hailRefs.current.cancel = true;
-    setHailActive(false);
-    addLog(`Filesystem Hail Mary stopping…`);
+  const clearIdbDatabase = async () => {
+    const r = idbRefs.current;
+    if (r.db) { try { r.db.close(); } catch {} r.db = null; }
+    await new Promise((resolve) => {
+      const req = indexedDB.deleteDatabase('rampage_idb');
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+      req.onblocked = () => resolve();
+    });
+    addLog(`IndexedDB: database deleted`, 'success');
+  };
+
+  const stopIdbFlood = async () => {
+    const r = idbRefs.current;
+    r.cancel = true;
+    if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
+    setIdbActive(false);
+    addLog(`IndexedDB flood stopping…`);
+    // small delay to let pending tx finish, then wipe
+    setTimeout(() => clearIdbDatabase(), 100);
   };
 
   const clearAll = useCallback(() => {
@@ -647,7 +629,7 @@ export default function Dashboard() {
       clearStorage();
       stopNetworkStress();
       stopRtcStorm();
-      stopHailMary();
+      stopIdbFlood();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -970,7 +952,7 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || hailActive;
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
@@ -978,7 +960,7 @@ export default function Dashboard() {
     (gpuActive || vramActive) && 'GPU',
     netActive && 'NETWORK',
     rtcActive && 'WEBRTC',
-    hailActive && 'FILES',
+    idbActive && 'IDB',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -1007,7 +989,7 @@ export default function Dashboard() {
               {view === 'GPU' && 'GPU'}
               {view === 'NETWORK' && 'Network'}
               {view === 'WEBRTC' && 'WebRTC'}
-              {view === 'FILES' && 'Disk Hail'}
+              {view === 'IDB' && 'IndexedDB'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -1115,19 +1097,16 @@ export default function Dashboard() {
             />
           )}
 
-          {view === 'FILES' && (
-            <FileHailView
-              hailActive={hailActive}
-              hailStats={hailStats}
-              hailChunk={hailChunk}
-              hailPattern={hailPattern}
-              hailUnsupported={hailUnsupported}
-              hailReason={hailReason}
-              setHailChunk={setHailChunk}
-              setHailPattern={setHailPattern}
-              startHailMary={startHailMary}
-              stopHailMary={stopHailMary}
-              gotoStorage={() => setView('STORAGE')}
+          {view === 'IDB' && (
+            <IndexedDbView
+              idbActive={idbActive}
+              idbStats={idbStats}
+              idbChunk={idbChunk}
+              idbStores={idbStores}
+              setIdbChunk={setIdbChunk}
+              setIdbStores={setIdbStores}
+              startIdbFlood={startIdbFlood}
+              stopIdbFlood={stopIdbFlood}
             />
           )}
 
