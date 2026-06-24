@@ -15,27 +15,83 @@ function Stat({ label, value, unit, accent }) {
   );
 }
 
+function Banner({ children, variant = 'amber' }) {
+  const color = variant === 'amber' ? '#F59E0B' : variant === 'red' ? '#F87171' : '#34D399';
+  return (
+    <div
+      className="rounded-xl p-4 flex items-start gap-3 mb-6"
+      style={{ background: `${color}14`, border: `1px solid ${color}40` }}
+    >
+      <Icons.ShieldAlert size={16} style={{ color }} className="shrink-0 mt-0.5" />
+      <div className="text-xs text-fox-2 leading-relaxed space-y-2">{children}</div>
+    </div>
+  );
+}
+
+const REASON_TEXT = {
+  'unsupported-browser': () => (
+    <>
+      <p>
+        This browser does not implement the <span className="mono text-fox">File System Access API</span>
+        {' '}(<span className="mono text-fox">showSaveFilePicker</span>). This feature requires a
+        Chromium-based engine.
+      </p>
+      <p className="mono text-[10px] text-fox-3">
+        Switch to Chrome / Edge / Brave / Arc / Vivaldi to target a real file on disk.
+      </p>
+    </>
+  ),
+  'insecure-context': () => (
+    <>
+      <p>The page is not in a <span className="mono text-fox">secure context</span>.</p>
+      <p className="mono text-[10px] text-fox-3">
+        Open via <span className="text-fox">http://localhost</span> or <span className="text-fox">https://</span>.
+        LAN IPs (http://192.168.x.x) are rejected by the browser.
+      </p>
+    </>
+  ),
+  'brave-shields': () => (
+    <>
+      <p>
+        Brave supports this API but blocks per-site. To enable on this page:
+      </p>
+      <ol className="mono text-[10px] text-fox-3 list-decimal pl-4 space-y-0.5">
+        <li>Click the Brave lion icon in the address bar</li>
+        <li>Lower shields for this site, or</li>
+        <li>Open <span className="text-fox">brave://settings/content/fileSystemAccess</span> and allow</li>
+      </ol>
+    </>
+  ),
+};
+
 export default function FileHailView({
   hailActive, hailStats,
   hailChunk, hailPattern,
   setHailChunk, setHailPattern,
   startHailMary, stopHailMary,
-  hailUnsupported,
+  hailUnsupported, hailReason,
+  gotoStorage,
 }) {
   const running = hailActive;
+  const showBanner = hailUnsupported || hailReason === 'brave-shields';
 
   return (
     <div className="space-y-4">
       <Panel title="Filesystem hail mary" status={running ? 'active' : 'idle'}>
-        {hailUnsupported ? (
-          <div className="flex items-start gap-3 mb-2">
-            <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
-            <p className="text-xs text-fox-2 leading-relaxed">
-              Your browser does not expose the <span className="mono text-fox">File System Access API</span>.
-              Use a recent Chromium-based browser (Chrome / Edge / Brave / Arc) to target a real file on disk.
-            </p>
-          </div>
-        ) : (
+        {showBanner && hailReason && (
+          <Banner variant={hailUnsupported ? 'amber' : 'amber'}>
+            {REASON_TEXT[hailReason]?.() ?? null}
+            {hailUnsupported && (
+              <div className="pt-2">
+                <Button variant="secondary" icon="HardDrive" onClick={gotoStorage}>
+                  Use in-browser OPFS storage instead
+                </Button>
+              </div>
+            )}
+          </Banner>
+        )}
+
+        {!hailUnsupported && (
           <>
             {/* stat grid */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
@@ -93,17 +149,13 @@ export default function FileHailView({
             </div>
 
             {!hailActive ? (
-              <div className="flex gap-3 flex-wrap">
-                <Button variant="primary" icon="HardDrive" onClick={startHailMary}>
-                  Pick file &amp; start writing
-                </Button>
-              </div>
+              <Button variant="primary" icon="HardDrive" onClick={startHailMary}>
+                Pick file &amp; start writing
+              </Button>
             ) : (
-              <div className="flex gap-3 flex-wrap">
-                <Button variant="destructive" icon="Square" onClick={stopHailMary}>
-                  Stop · {hailStats.writtenMB.toFixed(0)} MB written
-                </Button>
-              </div>
+              <Button variant="destructive" icon="Square" onClick={stopHailMary}>
+                Stop · {hailStats.writtenMB.toFixed(0)} MB written
+              </Button>
             )}
           </>
         )}

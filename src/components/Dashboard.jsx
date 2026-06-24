@@ -70,6 +70,7 @@ export default function Dashboard() {
   const [hailChunk, setHailChunk] = useState(32);
   const [hailPattern, setHailPattern] = useState('RANDOM');
   const [hailUnsupported, setHailUnsupported] = useState(false);
+  const [hailReason, setHailReason] = useState(null);
   const hailRefs = useRef({ handle: null, writable: null, loop: null, cancel: false, lastBytes: 0, lastTime: 0 });
 
   // Benchmarking
@@ -196,6 +197,31 @@ export default function Dashboard() {
   useEffect(() => {
     const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     setIsMobile(checkMobile);
+  }, []);
+
+  // File System Access API capability check + reason diagnosis
+  useEffect(() => {
+    const ua = navigator.userAgent;
+    const isBrave = /Brave/.test(ua) || navigator.brave !== undefined;
+    const isFirefox = /Firefox/.test(ua);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+    const hasApi = typeof window.showSaveFilePicker === 'function';
+    const secure = window.isSecureContext;
+
+    let unsupported = false;
+    let reason = null;
+    if (isFirefox || isSafari || !hasApi) {
+      unsupported = true;
+      reason = 'unsupported-browser';
+    } else if (!secure) {
+      unsupported = true;
+      reason = 'insecure-context';
+    } else if (isBrave) {
+      // brave is supported but often gated behind shields
+      reason = 'brave-shields';
+    }
+    setHailUnsupported(unsupported);
+    setHailReason(reason);
   }, []);
 
   // Force Storage UI update loop
@@ -521,6 +547,9 @@ export default function Dashboard() {
     } catch (e) {
       if (e && e.name === 'AbortError') {
         addLog(`Filesystem Hail Mary: file picker cancelled`);
+      } else if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+        setHailReason('brave-shields');
+        addLog(`Filesystem Hail Mary: permission denied — check browser shields/file-access settings`, 'error');
       } else {
         addLog(`Filesystem Hail Mary: picker error: ${e.message}`, 'error');
       }
@@ -1093,10 +1122,12 @@ export default function Dashboard() {
               hailChunk={hailChunk}
               hailPattern={hailPattern}
               hailUnsupported={hailUnsupported}
+              hailReason={hailReason}
               setHailChunk={setHailChunk}
               setHailPattern={setHailPattern}
               startHailMary={startHailMary}
               stopHailMary={stopHailMary}
+              gotoStorage={() => setView('STORAGE')}
             />
           )}
 
