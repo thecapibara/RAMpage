@@ -10,6 +10,7 @@ const NAV = [
   { view: 'WEBRTC',  label: 'WebRTC',     icon: 'Share2' },
   { view: 'IDB',     label: 'IndexedDB',  icon: 'Database' },
   { view: 'SW',      label: 'SW hammer',  icon: 'Bolt' },
+  { view: 'AUDIO',   label: 'Audio',      icon: 'Flame' },
   { view: 'BENCH',   label: 'Benchmarks', icon: 'Trophy' },
 ];
 

@@ -14,6 +14,7 @@ import BenchmarksView from './views/BenchmarksView';
 import WebRtcView from './views/WebRtcView';
 import IndexedDbView from './views/IndexedDbView';
 import SwHammerView from './views/SwHammerView';
+import AudioView from './views/AudioView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -81,6 +82,14 @@ export default function Dashboard() {
   const [swRate, setSwRate] = useState(20);
   const [swRegState, setSwRegState] = useState('init'); // init | ok | registered-before | <error msg>
   const swRefs = useRef({ reg: null, loop: null, cancel: false, count: 0, cpuMsAcc: 0, bytes: 0, lastTime: 0, lastCount: 0, statsTimer: null });
+
+  // AudioContext Abuse State
+  const [audioActive, setAudioActive] = useState(false);
+  const [audioStats, setAudioStats] = useState({ running: 0, renders: 0, samples: 0, seconds: 0 });
+  const [audioVoices, setAudioVoices] = useState(8);
+  const [audioLength, setAudioLength] = useState(2);
+  const [audioMode, setAudioMode] = useState('conv');
+  const audioRefs = useRef({ active: 0, renders: 0, samples: 0, totalSamples: 0, start: 0, cancel: false, statsTimer: null });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -174,6 +183,10 @@ export default function Dashboard() {
       const s = swRefs.current;
       s.cancel = true;
       if (s.statsTimer) clearInterval(s.statsTimer);
+
+      // Cleanup AudioContext abuse
+      audioRefs.current.cancel = true;
+      if (audioRefs.current.statsTimer) clearInterval(audioRefs.current.statsTimer);
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -742,6 +755,147 @@ export default function Dashboard() {
     }
   };
 
+  // --- AUDIOCONTEXT ABUSE ---
+  const buildVoiceGraph = (ctx, mode, lengthSec) => {
+    const sr = ctx.sampleRate;
+    const totalSamples = Math.floor(sr * lengthSec);
+
+    // Convolver with long impulse response: noise tail
+    const buildIR = () => {
+      const buf = ctx.createBuffer(2, totalSamples, sr);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        for (let i = 0; i < d.length; i++) {
+          // decaying noise → simulates long cathedral reverb tail
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+        }
+      }
+      return buf;
+    };
+
+    // WaveShaper: monster curve
+    const makeCurve = () => {
+      const N = 300000;
+      const c = new Float32Array(N);
+      for (let i = 0; i < N; i++) {
+        const x = (i / N) * 2 - 1;
+        c[i] = Math.tanh(x * 3) + Math.sin(x * 18) * 0.15;
+      }
+      return c;
+    };
+
+    // Compressor at the end as a sink
+    const dest = ctx.createDynamicsCompressor();
+    dest.threshold.value = -40;
+    dest.knee.value = 30;
+    dest.ratio.value = 12;
+    dest.attack.value = 0.003;
+    dest.release.value = 0.25;
+    dest.connect(ctx.destination);
+
+    const tail = [dest];
+    if (mode === 'conv' || mode === 'chaos') {
+      const conv = ctx.createConvolver();
+      conv.buffer = buildIR();
+      conv.connect(dest);
+      tail.unshift(conv);
+    }
+    if (mode === 'waveshaper' || mode === 'chaos') {
+      const ws = ctx.createWaveShaper();
+      ws.curve = makeCurve();
+      ws.oversample = '4x';
+      ws.connect(tail[0]);
+      tail.unshift(ws);
+    }
+    if (mode === 'osc' || mode === 'chaos') {
+      // 8 oscillators each, varied type + freq, feeding chain
+      const types = ['sine', 'square', 'sawtooth', 'triangle'];
+      for (let i = 0; i < 8; i++) {
+        const osc = ctx.createOscillator();
+        osc.type = types[i % types.length];
+        osc.frequency.value = 110 + Math.random() * 1000;
+        osc.detune.value = (Math.random() - 0.5) * 60;
+        osc.connect(tail[0]);
+        osc.start(0);
+        osc.stop(lengthSec);
+      }
+    } else {
+      // No oscillator path → feed conv/ws with a noise source bufferSource
+      const noise = ctx.createBuffer(2, totalSamples, sr);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = noise.getChannelData(ch);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * 0.15;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = noise;
+      src.connect(tail[0]);
+      src.start(0);
+    }
+  };
+
+  const startAudio = async () => {
+    if (audioActive) return;
+    if (typeof OfflineAudioContext === 'undefined' && typeof webkitOfflineAudioContext === 'undefined') {
+      addLog(`Audio: OfflineAudioContext unsupported in this browser`, 'error');
+      return;
+    }
+    const r = audioRefs.current;
+    r.cancel = false;
+    r.renders = 0;
+    r.samples = 0;
+    r.totalSamples = 0;
+    r.active = 0;
+    r.start = performance.now();
+    setAudioActive(true);
+    setAudioStats({ running: 0, renders: 0, samples: 0, seconds: 0 });
+    addLog(`Audio abuse: spawning ${audioVoices}× ${audioLength}s ${audioMode} voices`, 'success');
+
+    // stats sampler
+    if (r.statsTimer) clearInterval(r.statsTimer);
+    r.statsTimer = setInterval(() => {
+      const seconds = (performance.now() - r.start) / 1000;
+      setAudioStats({
+        running: r.active,
+        renders: r.renders,
+        samples: r.totalSamples,
+        seconds,
+      });
+    }, 250);
+
+    const oneVoice = async () => {
+      while (!r.cancel) {
+        const sr = 44100;
+        const ctx = new OfflineAudioContext(2, Math.ceil(sr * audioLength), sr);
+        r.active += 1;
+        try {
+          buildVoiceGraph(ctx, audioMode, audioLength);
+          const buf = await ctx.startRendering();
+          r.renders += 1;
+          r.totalSamples += buf.length;
+        } catch (e) {
+          addLog(`Audio: render error: ${e.message}`, 'warning');
+        } finally {
+          r.active -= 1;
+        }
+        // yield
+        await new Promise((res) => setTimeout(res, 0));
+      }
+    };
+
+    // launch N concurrent voices; they loop until cancelled
+    for (let i = 0; i < audioVoices; i++) {
+      oneVoice().catch(() => { r.active = Math.max(0, r.active - 1); });
+    }
+  };
+
+  const stopAudio = () => {
+    const r = audioRefs.current;
+    r.cancel = true;
+    if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
+    setAudioActive(false);
+    addLog(`Audio abuse stopped. Voices: ${r.renders} renders, ${r.totalSamples.toLocaleString()} samples.`);
+  };
+
   const clearAll = useCallback(() => {
       stopRAM();
       clearStorage();
@@ -749,6 +903,7 @@ export default function Dashboard() {
       stopRtcStorm();
       stopIdbFlood();
       stopSw();
+      stopAudio();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -1071,7 +1226,7 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive;
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive || audioActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
@@ -1081,6 +1236,7 @@ export default function Dashboard() {
     rtcActive && 'WEBRTC',
     idbActive && 'IDB',
     swActive && 'SW',
+    audioActive && 'AUDIO',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -1111,6 +1267,7 @@ export default function Dashboard() {
               {view === 'WEBRTC' && 'WebRTC'}
               {view === 'IDB' && 'IndexedDB'}
               {view === 'SW' && 'SW hammer'}
+              {view === 'AUDIO' && 'Audio'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -1247,6 +1404,21 @@ export default function Dashboard() {
               startSw={startSw}
               stopSw={stopSw}
               clearSw={clearSw}
+            />
+          )}
+
+          {view === 'AUDIO' && (
+            <AudioView
+              audioActive={audioActive}
+              audioStats={audioStats}
+              audioVoices={audioVoices}
+              audioLength={audioLength}
+              audioMode={audioMode}
+              setAudioVoices={setAudioVoices}
+              setAudioLength={setAudioLength}
+              setAudioMode={setAudioMode}
+              startAudio={startAudio}
+              stopAudio={stopAudio}
             />
           )}
 
