@@ -13,6 +13,7 @@ import NetworkView from './views/NetworkView';
 import BenchmarksView from './views/BenchmarksView';
 import WebRtcView from './views/WebRtcView';
 import IndexedDbView from './views/IndexedDbView';
+import SwHammerView from './views/SwHammerView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -70,6 +71,16 @@ export default function Dashboard() {
   const [idbChunk, setIdbChunk] = useState(8);
   const [idbStores, setIdbStores] = useState(5);
   const idbRefs = useRef({ db: null, loop: null, cancel: false, bytes: 0, objects: 0, lastBytes: 0, lastTime: 0, statsTimer: null });
+
+  // Service Worker Hammer State
+  const [swActive, setSwActive] = useState(false);
+  const [swStats, setSwStats] = useState({ count: 0, rps: 0, cpuMs: 0, bytesMB: 0 });
+  const [swMode, setSwMode] = useState('fib');
+  const [swWork, setSwWork] = useState(200000);
+  const [swSize, setSwSize] = useState(65536);
+  const [swRate, setSwRate] = useState(20);
+  const [swRegState, setSwRegState] = useState('init'); // init | ok | registered-before | <error msg>
+  const swRefs = useRef({ reg: null, loop: null, cancel: false, count: 0, cpuMsAcc: 0, bytes: 0, lastTime: 0, lastCount: 0, statsTimer: null });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -158,6 +169,11 @@ export default function Dashboard() {
       // Cleanup IndexedDB flood loop
       if (idbRefs.current.statsTimer) clearInterval(idbRefs.current.statsTimer);
       idbRefs.current.cancel = true;
+
+      // Cleanup Service Worker hammer
+      const s = swRefs.current;
+      s.cancel = true;
+      if (s.statsTimer) clearInterval(s.statsTimer);
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -624,12 +640,115 @@ export default function Dashboard() {
     setTimeout(() => clearIdbDatabase(), 100);
   };
 
+  // --- SERVICE WORKER HAMMER ---
+  const ensureSwRegistered = async () => {
+    const r = swRefs.current;
+    if (r.reg) return r.reg;
+    try {
+      const reg = await navigator.serviceWorker.register('/sw-hammer.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      r.reg = reg;
+      setSwRegState('ok');
+      return reg;
+    } catch (e) {
+      setSwRegState(`register failed: ${e.message}`);
+      addLog(`SW: register failed: ${e.message}`, 'error');
+      return null;
+    }
+  };
+
+  const startSw = async () => {
+    if (swActive) return;
+    const reg = await ensureSwRegistered();
+    if (!reg) return;
+    const r = swRefs.current;
+    r.cancel = false;
+    r.count = 0;
+    r.cpuMsAcc = 0;
+    r.bytes = 0;
+    r.lastTime = performance.now();
+    r.lastCount = 0;
+    setSwActive(true);
+    setSwStats({ count: 0, rps: 0, cpuMs: 0, bytesMB: 0 });
+    addLog(`SW hammer started — mode=${swMode} work=${swWork} size=${swSize} rate=${swRate}ms`, 'success');
+
+    if (r.statsTimer) clearInterval(r.statsTimer);
+    r.statsTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - r.lastTime) / 1000;
+      const dCount = r.count - r.lastCount;
+      const rps = dt > 0 ? dCount / dt : 0;
+      const avgCpu = r.count > 0 ? r.cpuMsAcc / r.count : 0;
+      r.lastTime = now;
+      r.lastCount = r.count;
+      setSwStats({
+        count: r.count,
+        rps,
+        cpuMs: avgCpu,
+        bytesMB: r.bytes / (1024 * 1024),
+      });
+    }, 500);
+
+    const fetchOne = async () => {
+      const url = `/sw-hammer/r?mode=${swMode}&work=${swWork}&sz=${swSize}&_=${Date.now()}`;
+      try {
+        const res = await fetch(url);
+        r.bytes += Number(res.headers.get('Content-Length') || swSize);
+        const cpu = parseFloat(res.headers.get('X-Rampage-Cpu-Ms') || '0');
+        if (!isNaN(cpu)) r.cpuMsAcc += cpu;
+        r.count += 1;
+        // drain body so the response isn't hanging
+        await res.arrayBuffer();
+      } catch (e) {
+        // ignore transient network errors
+      }
+    };
+
+    const loop = async () => {
+      while (!r.cancel) {
+        // small batch in flight — fire in parallel to keep SW saturated
+        const burst = Math.max(1, Math.floor(50 / (swRate + 1)));
+        const bag = [];
+        for (let i = 0; i < burst; i++) bag.push(fetchOne());
+        await Promise.all(bag);
+        if (swRate > 0) await new Promise((res) => setTimeout(res, swRate));
+      }
+    };
+    r.loop = loop;
+    loop();
+  };
+
+  const stopSw = () => {
+    const r = swRefs.current;
+    r.cancel = true;
+    if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
+    setSwActive(false);
+    const finalCount = r.count;
+    addLog(`SW hammer stopped. ${finalCount.toLocaleString()} requests sent. SW is still active under /sw-hammer/ scope.`);
+  };
+
+  const clearSw = async () => {
+    const r = swRefs.current;
+    stopSw();
+    try {
+      if (r.reg) {
+        await r.reg.unregister();
+        r.reg = null;
+        addLog(`SW unregistered`, 'success');
+        setSwRegState('init');
+      }
+    } catch (e) {
+      addLog(`SW unregister error: ${e.message}`, 'error');
+    }
+  };
+
   const clearAll = useCallback(() => {
       stopRAM();
       clearStorage();
       stopNetworkStress();
       stopRtcStorm();
       stopIdbFlood();
+      stopSw();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -952,7 +1071,7 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive;
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
@@ -961,6 +1080,7 @@ export default function Dashboard() {
     netActive && 'NETWORK',
     rtcActive && 'WEBRTC',
     idbActive && 'IDB',
+    swActive && 'SW',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -990,6 +1110,7 @@ export default function Dashboard() {
               {view === 'NETWORK' && 'Network'}
               {view === 'WEBRTC' && 'WebRTC'}
               {view === 'IDB' && 'IndexedDB'}
+              {view === 'SW' && 'SW hammer'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -1107,6 +1228,25 @@ export default function Dashboard() {
               setIdbStores={setIdbStores}
               startIdbFlood={startIdbFlood}
               stopIdbFlood={stopIdbFlood}
+            />
+          )}
+
+          {view === 'SW' && (
+            <SwHammerView
+              swActive={swActive}
+              swStats={swStats}
+              swMode={swMode}
+              swWork={swWork}
+              swSize={swSize}
+              swRate={swRate}
+              swRegState={swRegState}
+              setSwMode={setSwMode}
+              setSwWork={setSwWork}
+              setSwSize={setSwSize}
+              setSwRate={setSwRate}
+              startSw={startSw}
+              stopSw={stopSw}
+              clearSw={clearSw}
             />
           )}
 

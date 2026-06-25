@@ -9,6 +9,7 @@ const NAV = [
   { view: 'NETWORK', label: 'Network',    icon: 'Wifi' },
   { view: 'WEBRTC',  label: 'WebRTC',     icon: 'Share2' },
   { view: 'IDB',     label: 'IndexedDB',  icon: 'Database' },
+  { view: 'SW',      label: 'SW hammer',  icon: 'Bolt' },
   { view: 'BENCH',   label: 'Benchmarks', icon: 'Trophy' },
 ];
 

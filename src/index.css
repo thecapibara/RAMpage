@@ -12,8 +12,9 @@
     -moz-user-select: none;
     user-select: none;
   }
-  /* allow selection inside logs (for copy-to-clipboard fallback) */
-  .selectable {
+  /* allow selection inside logs / diagnostics / errors (for copy-to-clipboard fallback) */
+  .selectable,
+  .selectable * {
     -webkit-user-select: text;
     -moz-user-select: text;
     user-select: text;
