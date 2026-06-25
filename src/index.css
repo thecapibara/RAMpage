@@ -63,9 +63,13 @@
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
+  height: 16px;
+  outline: none;
+  background: transparent;
+}
+.range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 4px;
-  outline: none;
   background: rgba(255,255,255,.06);
 }
 .range::-webkit-slider-thumb {
@@ -77,6 +81,11 @@
   background: #ECECF5;
   cursor: pointer;
   margin-top: -5px;
+}
+.range::-moz-range-track {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.06);
 }
 .range::-moz-range-thumb {
   width: 14px;

@@ -27,7 +27,7 @@ export default function Sidebar({ view, onViewChange, status, activeViews, onRes
             <h1 className="font-display text-[14px] font-bold tracking-[0.08em] leading-none">
               <span className="text-lime">RAM</span><span className="text-fox">PAGE</span><span className="text-red">!</span>
             </h1>
-            <div className="mono text-[9px] text-fox-3 mt-1.5 tracking-tight">v4.5 • Full Stress Suite • JustGL</div>
+            <div className="mono text-[9px] text-fox-3 mt-1.5 tracking-tight">v5.0 • Full Stress Suite • JustGL</div>
           </div>
         </div>
       </div>
