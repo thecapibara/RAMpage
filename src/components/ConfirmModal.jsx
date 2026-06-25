@@ -5,30 +5,34 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-slate-950 border-2 border-red-500 rounded-xl overflow-hidden shadow-[0_0_20px_rgba(239,68,68,0.3)] p-6 font-mono">
-        {/* Top bar with alert symbol */}
-        <div className="flex items-center gap-3 border-b border-red-500/20 pb-4 mb-4">
-          <Icons.ShieldAlert className="text-red-500 w-8 h-8 animate-pulse" />
-          <h2 className="text-lg font-black text-white uppercase tracking-wider">{title}</h2>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink-0/85 p-4">
+      <div
+        className="glass rounded-2xl p-6 max-w-md w-full"
+        style={{ borderColor: 'rgba(248,113,113,.5)', boxShadow: '0 0 60px -10px rgba(248,113,113,.4), 0 1px 0 rgba(255,255,255,.05) inset' }}
+      >
+        <div className="flex items-center gap-3 pb-4 mb-4 border-b border-line">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center animate-pulse-soft"
+            style={{ background: 'rgba(248,113,113,.15)', border: '1px solid rgba(248,113,113,.5)' }}
+          >
+            <Icons.ShieldAlert className="text-red" size={20} />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wide text-fox">{title}</h2>
+            <p className="mono text-[.7rem] text-fox-3 mt-0.5">all processes will be terminated</p>
+          </div>
         </div>
-        
-        {/* Message body */}
-        <p className="text-sm text-slate-300 mb-6 leading-relaxed">
-          {message}
-        </p>
-        
-        {/* Action buttons */}
-        <div className="flex gap-4">
-          <button 
+        <p className="text-sm text-fox-2 mb-6 leading-relaxed">{message}</p>
+        <div className="flex gap-3">
+          <button
             onClick={onCancel}
-            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-lg text-xs border border-slate-700 transition-colors uppercase"
+            className="flex-1 bg-white/[.03] border border-line text-fox-2 font-semibold py-2.5 rounded-lg text-xs hover:text-fox hover:border-line-strong transition-colors uppercase tracking-wide"
           >
             Cancel
           </button>
-          <button 
+          <button
             onClick={onConfirm}
-            className="flex-1 bg-red-600 hover:bg-red-500 text-white font-bold py-2.5 rounded-lg text-xs border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.2)] hover:shadow-[0_0_15px_rgba(239,68,68,0.4)] transition-all uppercase"
+            className="flex-1 bg-red/12 text-red border border-red/40 hover:bg-red/22 hover:shadow-glow-red font-semibold py-2.5 rounded-lg text-xs transition-all uppercase tracking-wide"
           >
             Confirm
           </button>

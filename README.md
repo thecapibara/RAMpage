@@ -1,109 +1,106 @@
-# RAMpage! [ex-RAM Eater Ultimate] v4.4
+# RAMpage! v5.0
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-18-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky) [![App](https://img.shields.io/badge/demo-online-green?logo=vercel&logoColor=white)](https://ram-eater.vercel.app/)
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![React](https://img.shields.io/badge/React-19-blue) ![Tailwind](https://img.shields.io/badge/Tailwind-3.0-sky)
 
-**RAM Eater Ultimate** has evolved from a simple memory tool into a **comprehensive browser-based system stress suite**. 
-
-It is designed to visualize and test browser limits across multiple vectors: **RAM allocation, CPU concurrency, GPU rendering, Storage quotas, and Network bandwidth**. It utilizes Web Workers, WebGL shaders, and IndexedDB to ensure maximum load generation while keeping the main interface responsive.
+**RAMpage!** is a comprehensive browser-based system stress suite. It exercises the
+limits of every major browser subsystem — main thread, Web Workers, GPU compute,
+storage, network, audio thread, service worker, and the 2D rasterizer — through a
+single dark glass UI.
 
 ## ⚠️ Ethical Use & Disclaimer
 
 **READ THIS BEFORE USING:**
 
-This software is developed strictly for **educational purposes** and for **stress testing your own hardware/software environments**.
+This software is developed strictly for **educational purposes** and for **stress
+testing your own hardware/software environments**.
 
-* **DO NOT** use this tool to crash public terminals, kiosks, or computers that do not belong to you.
-* **DO NOT** use this tool for malicious "Denial of Service" attacks or to freeze user browsers on purpose.
-* **Liability:** The developer is not responsible for any data loss, hardware instability, or system crashes resulting from the misuse of this tool. By using this software, you agree that you are testing your own system limits.
+* **DO NOT** use this tool to crash public terminals, kiosks, or computers that do
+  not belong to you.
+* **DO NOT** use this tool for malicious "Denial of Service" attacks or to freeze
+  user browsers on purpose.
+* **Liability:** The developer is not responsible for any data loss, hardware
+  instability, or system crashes resulting from the misuse of this tool. By using
+  this software, you agree that you are testing your own system limits.
 
-## ✨ Key Features
+## ✨ Stress Vectors (11)
 
-* **🧠 High-Volume RAM Allocation:** Push memory usage to the limit (up to ~16GB) using multi-threaded Web Workers to test Garbage Collection and OOM behavior.
-* **🔥 CPU Stress Test:** Integrated CPU burner with adjustable intensity (0-100%) that runs complex math operations on separate threads.
-* **👾 Minions Mode:** Bypasses browser memory limits by spawning a coordinated popup windows. Easily consume 32GB+ RAM.
-* **⛏️ Hash Stress & Chaos:** The hash stress test (ALU stress) that can be combined with "Chaos" allocation to break V8 garbage collection.
-* **🎮 GPU Stress & Burner:** Advanced WebGL renderer featuring:
-    * **3 Modes:** Fractal, 3D Raymarching, and Particle Fire.
-    * **Resolution Scaling:** Render up to 8K resolution.
-    * **Overdrive:** Render multiple passes per frame to maximize GPU load.
-    * **VRAM Burner:** Allocates massive invisible textures to rapidly consume available GPU video memory (VRAM).
-* **💾 Storage Killer:** Rapidly fills local disk space with raw binary data using high-speed OPFS sync writes until the browser quota is exceeded.
-* **⚡ Network Storm:** Simulates heavy network traffic by running parallel download streams and request floods to saturate bandwidth.
-* **🏆 Competitive Benchmarking:**
-    * **CPU Survival:** Test how long your browser can survive increasing RAM/CPU loads.
-    * **GPU Benchmark:** Run automated graphical tests and get a performance score.
-* **🛡️ Emergency Stop:** Press **ESC** 3 times quickly or use the "Emergency Reset" button to immediately terminate all workers, clear memory, and stop renders.
+| Vector | Subsystem hit | What it does |
+|---|---|---|
+| 🧠 **RAM & CPU** | Web Workers + heap | Multi-threaded RAM allocation up to ~16 GB, with CPU burner, hash stress, Minions (cross-window RAM bypass) |
+| 💾 **Storage** | OPFS sync writes | Fills local disk with raw 10 MB chunks via SyncAccessHandle until browser quota |
+| 🎮 **GPU** | WebGL compute | Three shader modes (Fractal / 3D raymarch / Fire), resolution up to 8K, overdrive passes |
+| 🎮 **VRAM Eater** | GPU texture memory | Allocates 64 MB uncompressed RGBA8 textures until VRAM exhaustion |
+| 🌐 **Network** | fetch storm | Background worker that burns bandwidth with parallel download streams |
+| 🔗 **WebRTC mesh** | DTLS/SRTP + ICE | N peer-pairs connected via local loopback, DataChannel junk + optional media tracks for heavy video encode/decode |
+| 🗄️ **IndexedDB** | structured clone + quota | Parallel object stores receiving `Blob` puts — every `put()` re-clones the payload until `QuotaExceededError` |
+| ⚡ **SW hammer** | service worker thread | Registered SW intercepts `/sw-hammer/*` fetches and runs heavy work (Fibonacci / SHA-256 / buffer XOR / JSON churn) in its own thread |
+| 🔊 **AudioContext abuse** | audio/DSP render thread | Parallel `OfflineAudioContext` jobs in 4 modes — Convolution (FFT), Oscillator banks, WaveShaper tables, all-in-one |
+| 🎨 **Pixel 2D** | 2D rasterizer + memory bus | 8K `Canvas2D` with `getImageData` / per-pixel mutation / `putImageData` × N passes per frame (XOR / Noise / Blend) |
+| 🏆 **Benchmarks** | composite scoring | CPU survival suite + GPU test suites (Light / Normal / Burner) with persistent high scores |
 
-## 🚀 Installation & Setup
+## 🛡️ Emergency Reset
 
-This project uses **Vite** and **Tailwind CSS**.
+The **Emergency reset** button in the sidebar footer instantly terminates every
+worker, clears IndexedDB and OPFS storage, closes all Service Worker registrations,
+releases all WebRTC connections, cancels audio contexts and drops all GPU work.
+
+## 🚀 Installation
+
+This project uses **Vite** and **Tailwind CSS v3**.
 
 ### Prerequisites
-* Node.js (v18 or higher recommended)
+
+* Node.js v18 or higher
 
 ### 1. Clone the repository
 
 ```
 git clone https://github.com/thecapibara/rampage.git
-```
-```
 cd rampage
 ```
 
 ### 2. Install Dependencies
 
-```npm install
-# Install Lucide icons
-npm install lucide-react
-# Install Tailwind CSS (Explicitly v3 for compatibility)
-npm install -D tailwindcss@3 postcss autoprefixer
+```
+npm install
 ```
 
-### 3. Initialize Tailwind
-
-```
-npx tailwindcss init -p
-```
-
-### 4. Run the Development Server
+### 3. Run the Development Server
 
 ```
 npm run dev
 ```
-## 🛠 Configuration
 
-Ensure your `tailwind.config.js` is set up to scan your source files:
+### 4. Build for Production
 
 ```
-export default {
-  content: [
-    "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
-  ],
-  theme: {
-    extend: {},
-  },
-  plugins: [],
-}
+npm run build
+npm run preview
 ```
 
 ## 🖥 Usage Guide
 
-1.  **RAM/CPU Tab:** Set target MB and CPU load, then click **Start Load**.
-2.  **Storage Tab:** Click **Fill** to start writing blobs to disk. Watch the "MB Written" counter.
-3.  **GPU Tab:** Select a mode (Fractal/3D/Fire), adjust resolution/intensity, and click **Manual Start**.
-4.  **Network:** Click **Burn Traffic** to start the bandwidth stress test.
-5.  **Benchmarks:** Use the "Benchmarks" panel to run automated scoring tests.
+Pick a vector from the sidebar, adjust its controls, and hit the primary action
+button. Several vectors can run simultaneously. The status pill in the sidebar
+footer shows the global system state (idle / active / error). The **event log**
+at the bottom of every view records every action with live copy-to-clipboard.
+
+## 🧩 Tech Stack
+
+* **React 19** + **Vite 5**
+* **Tailwind CSS 3** with custom dark palette + glass utilities
+* **Space Grotesk** display font for the logo, **Inter** for body, **JetBrains Mono** for metrics
+* Vanilla WebWorkers, OfflineAudioContext, WebRTC, IndexedDB, File System Access, Service Worker APIs
 
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-1.  Fork the project
-2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3.  Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4.  Push to the Branch (`git push origin feature/AmazingFeature`)
-5.  Open a Pull Request
+1. Fork the project
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## 📄 License
 
