@@ -11,6 +11,7 @@ const NAV = [
   { view: 'IDB',     label: 'IndexedDB',  icon: 'Database' },
   { view: 'SW',      label: 'SW hammer',  icon: 'Bolt' },
   { view: 'AUDIO',   label: 'Audio',      icon: 'Flame' },
+  { view: 'PIXEL',   label: 'Pixel 2D',   icon: 'Aperture' },
   { view: 'BENCH',   label: 'Benchmarks', icon: 'Trophy' },
 ];
 

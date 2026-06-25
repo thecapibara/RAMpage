@@ -15,6 +15,7 @@ import WebRtcView from './views/WebRtcView';
 import IndexedDbView from './views/IndexedDbView';
 import SwHammerView from './views/SwHammerView';
 import AudioView from './views/AudioView';
+import Canvas2dView from './views/Canvas2dView';
 import {
   MAX_LIMIT,
   WORKER_CAP,
@@ -90,6 +91,14 @@ export default function Dashboard() {
   const [audioLength, setAudioLength] = useState(2);
   const [audioMode, setAudioMode] = useState('conv');
   const audioRefs = useRef({ active: 0, renders: 0, samples: 0, totalSamples: 0, start: 0, cancel: false, statsTimer: null });
+
+  // Canvas 2D Pixel Storm State
+  const [c2dActive, setC2dActive] = useState(false);
+  const [c2dStats, setC2dStats] = useState({ frames: 0, pxPerFrame: 0, mpps: 0 });
+  const [c2dRes, setC2dRes] = useState(1920);
+  const [c2dPasses, setC2dPasses] = useState(4);
+  const [c2dMode, setC2dMode] = useState('xor');
+  const c2dRefs = useRef({ raf: null, cancel: false, frames: 0, pxPerFrame: 0, lastTime: 0, lastFrames: 0, statsTimer: null });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -187,6 +196,12 @@ export default function Dashboard() {
       // Cleanup AudioContext abuse
       audioRefs.current.cancel = true;
       if (audioRefs.current.statsTimer) clearInterval(audioRefs.current.statsTimer);
+
+      // Cleanup Canvas 2D pixel storm
+      const c2 = c2dRefs.current;
+      c2.cancel = true;
+      if (c2.raf) cancelAnimationFrame(c2.raf);
+      if (c2.statsTimer) clearInterval(c2.statsTimer);
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -896,6 +911,100 @@ export default function Dashboard() {
     addLog(`Audio abuse stopped. Voices: ${r.renders} renders, ${r.totalSamples.toLocaleString()} samples.`);
   };
 
+  // --- CANVAS 2D PIXEL STORM ---
+  const startC2d = () => {
+    if (c2dActive) return;
+    const r = c2dRefs.current;
+    r.cancel = false;
+    r.frames = 0;
+    r.lastTime = performance.now();
+    r.lastFrames = 0;
+
+    const h = (c2dRes * 9 / 16) | 0;
+    const w = c2dRes;
+    const pxPerFrame = w * h * c2dPasses;
+    r.pxPerFrame = pxPerFrame;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      addLog(`Pixel 2D: 2D context unavailable`, 'error');
+      return;
+    }
+
+    setC2dActive(true);
+    setC2dStats({ frames: 0, pxPerFrame, mpps: 0 });
+    addLog(`Pixel 2D storm: ${w}×${h}, ${c2dPasses} passes, ${c2dMode} mode`, 'success');
+
+    // initial fill so getImageData has content
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, w, h);
+
+    if (r.statsTimer) clearInterval(r.statsTimer);
+    r.statsTimer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - r.lastTime) / 1000;
+      const dFrames = r.frames - r.lastFrames;
+      const fps = dt > 0 ? dFrames / dt : 0;
+      const mpps = (fps * r.pxPerFrame) / 1e6;
+      r.lastTime = now;
+      r.lastFrames = r.frames;
+      setC2dStats((s) => ({ ...s, frames: r.frames, mpps }));
+    }, 500);
+
+    const doFrame = () => {
+      if (r.cancel) return;
+      for (let pass = 0; pass < c2dPasses; pass++) {
+        let img;
+        try {
+          img = ctx.getImageData(0, 0, w, h);
+        } catch (e) {
+          addLog(`Pixel 2D: getImageData failed: ${e.message}`, 'error');
+          stopC2d();
+          return;
+        }
+        const d = img.data;
+        if (c2dMode === 'xor') {
+          const seed = (Math.random() * 255) | 0;
+          for (let i = 0; i < d.length; i += 4) {
+            d[i] ^= seed; d[i+1] ^= (seed << 1) & 0xff; d[i+2] ^= (seed << 2) & 0xff;
+          }
+        } else if (c2dMode === 'noise') {
+          for (let i = 0; i < d.length; i += 4) {
+            d[i] = (Math.random()*256)|0; d[i+1] = (Math.random()*256)|0; d[i+2] = (Math.random()*256)|0;
+          }
+        } else {
+          // blend with moving gradient, read-modify-write — also stresses sampler path
+          const t = (r.frames + pass) * 0.05;
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const i = (y * w + x) * 4;
+              const g = (Math.sin(x*0.01 + t) * 0.5 + 0.5) * 255;
+              d[i] = (d[i] + g) >> 1;
+              d[i+1] = (d[i+1] + (Math.cos(y*0.01 + t) * 0.5 + 0.5) * 255) >> 1;
+              d[i+2] = (d[i+2] + g * 0.6) >> 1;
+            }
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+      }
+      r.frames += 1;
+      r.raf = requestAnimationFrame(doFrame);
+    };
+    r.raf = requestAnimationFrame(doFrame);
+  };
+
+  const stopC2d = () => {
+    const r = c2dRefs.current;
+    r.cancel = true;
+    if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
+    if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
+    setC2dActive(false);
+    addLog(`Pixel 2D storm stopped. Frames: ${r.frames.toLocaleString()}.`);
+  };
+
   const clearAll = useCallback(() => {
       stopRAM();
       clearStorage();
@@ -904,6 +1013,7 @@ export default function Dashboard() {
       stopIdbFlood();
       stopSw();
       stopAudio();
+      stopC2d();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -1226,7 +1336,7 @@ export default function Dashboard() {
   };
 
   const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
-                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive || audioActive;
+                    vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive || audioActive || c2dActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
     isAllocating && 'RAM',
@@ -1237,6 +1347,7 @@ export default function Dashboard() {
     idbActive && 'IDB',
     swActive && 'SW',
     audioActive && 'AUDIO',
+    c2dActive && 'PIXEL',
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
@@ -1268,6 +1379,7 @@ export default function Dashboard() {
               {view === 'IDB' && 'IndexedDB'}
               {view === 'SW' && 'SW hammer'}
               {view === 'AUDIO' && 'Audio'}
+              {view === 'PIXEL' && 'Pixel 2D'}
               {view === 'BENCH' && 'Benchmarks'}
             </h2>
             <span className="chip flex items-center gap-1.5">
@@ -1419,6 +1531,21 @@ export default function Dashboard() {
               setAudioMode={setAudioMode}
               startAudio={startAudio}
               stopAudio={stopAudio}
+            />
+          )}
+
+          {view === 'PIXEL' && (
+            <Canvas2dView
+              c2dActive={c2dActive}
+              c2dStats={c2dStats}
+              c2dRes={c2dRes}
+              c2dPasses={c2dPasses}
+              c2dMode={c2dMode}
+              setC2dRes={setC2dRes}
+              setC2dPasses={setC2dPasses}
+              setC2dMode={setC2dMode}
+              startC2d={startC2d}
+              stopC2d={stopC2d}
             />
           )}
 
