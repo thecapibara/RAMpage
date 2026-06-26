@@ -17,7 +17,7 @@ function Stat({ label, value, unit, accent }) {
 
 export default function WebRtcView({
   rtcActive, rtcStats,
-  rtcPeers, rtcPayload, rtcInterval, rtcMedia,
+  rtcPeers, rtcPayload, rtcInterval, rtcMedia, isMobile,
   setRtcPeers, setRtcPayload, setRtcInterval, setRtcMedia,
   startRtcStorm, stopRtcStorm,
 }) {
@@ -51,19 +51,23 @@ export default function WebRtcView({
         </div>
 
         <label
-          className="flex items-center gap-2 cursor-pointer select-none p-2.5 rounded-lg border border-line hover:border-line-strong transition-colors mb-7 w-fit"
+          className={`flex items-center gap-2 ${isMobile ? 'cursor-not-allowed opacity-40' : 'cursor-pointer select-none'} p-2.5 rounded-lg border border-line ${isMobile ? '' : 'hover:border-line-strong'} transition-colors mb-7 w-fit`}
           style={{ background: 'rgba(255,255,255,.025)' }}
+          title={isMobile ? 'Camera decode while stressing is unstable on mobile' : ''}
         >
           <input
             type="checkbox"
-            checked={rtcMedia}
+            checked={rtcMedia && !isMobile}
             onChange={(e) => setRtcMedia(e.target.checked)}
-            disabled={running}
+            disabled={running || isMobile}
             className="w-4 h-4"
             style={{ accentColor: '#34D399' }}
           />
           <span className="text-xs text-fox-2 flex items-center gap-1.5">
-            <Icons.Monitor size={12} /> Add getUserMedia video tracks (heavy encode load)
+            <Icons.Monitor size={12} />
+            {isMobile
+              ? 'getUserMedia video tracks (desktop only)'
+              : 'Add getUserMedia video tracks (heavy encode load)'}
           </span>
         </label>
 

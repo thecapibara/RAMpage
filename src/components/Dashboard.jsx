@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [workers, setWorkers] = useState([]);
   const [chartDataRAM, setChartDataRAM] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   
   const [storageUsed, setStorageUsed] = useState(0);
   const [storageCount, setStorageCount] = useState(0); 
@@ -236,10 +237,14 @@ export default function Dashboard() {
       });
   }, []);
 
-  // Mobile check
+  // Mobile check (viewport + UA fallback, live-updating)
   useEffect(() => {
-    const checkMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    setIsMobile(checkMobile);
+    const uaMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const mq = window.matchMedia('(max-width: 640px)');
+    const update = () => setIsMobile(uaMobile || mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
   }, []);
 
   // Force Storage UI update loop
@@ -1356,6 +1361,57 @@ export default function Dashboard() {
     setActiveTab('GPU');
   };
 
+  const mobileDisabledViews = isMobile
+    ? ['GPU', 'SW', 'AUDIO', 'PIXEL', 'BENCH'] // crash-prone / throttled on mobile
+    : [];
+
+  // Mobile FAB: per-view primary action (start/stop) for the current view
+  const fabBusy = isBenchmarking || gpuBenchMode !== 'NONE';
+  const fabByView = {
+    RAM: {
+      active: isAllocating,
+      busy: fabBusy,
+      start: () => allocateMemory(),
+      stop: stopRAM,
+      startLabel: cpuMode === 'HASH' ? 'Hash' : 'Start load',
+      stopLabel: 'Stop RAM',
+    },
+    STORAGE: {
+      active: isFillingStorage,
+      busy: fabBusy,
+      start: fillStorage,
+      stop: stopStorage,
+      startLabel: 'Fill disk',
+      stopLabel: 'Stop fill',
+    },
+    NETWORK: {
+      active: netActive,
+      busy: fabBusy,
+      start: runNetworkStress,
+      stop: stopNetworkStress,
+      startLabel: 'Burn traffic',
+      stopLabel: 'Stop network',
+    },
+    WEBRTC: {
+      active: rtcActive,
+      busy: fabBusy,
+      start: startRtcStorm,
+      stop: stopRtcStorm,
+      startLabel: 'Start mesh',
+      stopLabel: 'Stop storm',
+    },
+    IDB: {
+      active: idbActive,
+      busy: fabBusy,
+      start: startIdbFlood,
+      stop: stopIdbFlood,
+      startLabel: 'Flood IDB',
+      stopLabel: 'Stop flood',
+    },
+  };
+  const fabEntry = fabByView[view];
+  const showFab = isMobile && fabEntry && !fabEntry.busy;
+
   return (
     <div className="h-screen w-full flex overflow-hidden font-sans text-fox relative">
       <Sidebar
@@ -1364,12 +1420,26 @@ export default function Dashboard() {
         status={status}
         activeViews={activeViews}
         onReset={handleEmergencyResetConfirm}
+        isMobile={isMobile}
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        mobileDisabled={mobileDisabledViews}
       />
 
       <main className="flex-1 overflow-y-auto p-3">
         {/* topbar */}
         <div className="glass rounded-2xl px-5 py-3 mb-4 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-3">
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="p-2 -ml-2 rounded-md text-fox-2 hover:text-fox hover:bg-white/[.06] transition-colors"
+                aria-label="Open menu"
+              >
+                <Icons.Menu size={18} />
+              </button>
+            )}
             <h2 className="text-base font-semibold">
               {view === 'RAM' && 'RAM & CPU'}
               {view === 'STORAGE' && 'Storage'}
@@ -1393,6 +1463,24 @@ export default function Dashboard() {
         </div>
 
         <div className="pb-6">
+          {isMobile && mobileDisabledViews.includes(view) && (
+            <div className="glass rounded-xl p-8 text-center">
+              <div className="flex justify-center mb-4">
+                <Icons.Box size={28} className="text-fox-3" />
+              </div>
+              <h2 className="text-base font-semibold text-fox mb-2">Not available on mobile</h2>
+              <p className="text-xs text-fox-3 mb-6 leading-relaxed max-w-sm mx-auto">
+                This stress vector is too heavy for mobile hardware — the browser would freeze or
+                the OS would throttle it almost immediately. Open RAMpage! on a desktop to use it.
+              </p>
+              <Button variant="primary" icon="Cpu" onClick={() => setView('RAM')}>
+                Back to RAM &amp; CPU
+              </Button>
+            </div>
+          )}
+
+          {!isMobile || !mobileDisabledViews.includes(view) ? (
+            <>
           {view === 'RAM' && (
             <RamCpuView
               allocatedMB={allocatedMB}
@@ -1447,6 +1535,7 @@ export default function Dashboard() {
               showGpuPopup={showGpuPopup}
               isBenchmarking={isBenchmarking}
               gpuBenchMode={gpuBenchMode}
+              isMobile={isMobile}
               vramActive={vramActive}
               vramCount={vramCount}
               setGpuMode={setGpuMode}
@@ -1478,6 +1567,7 @@ export default function Dashboard() {
               rtcPayload={rtcPayload}
               rtcInterval={rtcInterval}
               rtcMedia={rtcMedia}
+              isMobile={isMobile}
               setRtcPeers={setRtcPeers}
               setRtcPayload={setRtcPayload}
               setRtcInterval={setRtcInterval}
@@ -1562,6 +1652,26 @@ export default function Dashboard() {
               gpuBenchMode={gpuBenchMode}
               runGpuBenchmark={runGpuBenchmark}
             />
+          )}
+            </>
+          ) : null}
+
+          {showFab && (
+            <button
+              type="button"
+              onClick={fabEntry.active ? fabEntry.stop : fabEntry.start}
+              className={`fixed bottom-5 right-5 z-30 w-16 h-16 rounded-full shadow-panel flex items-center justify-center text-xs font-semibold transition-transform active:scale-95 ${
+                fabEntry.active
+                  ? 'bg-red/20 text-red border border-red/50'
+                  : 'bg-grad-accent text-ink-1'
+              }`}
+              style={fabEntry.active ? {} : { boxShadow: '0 8px 30px -6px rgba(52,211,153,.6)' }}
+              aria-label={fabEntry.active ? fabEntry.stopLabel : fabEntry.startLabel}
+            >
+              {fabEntry.active
+                ? <Icons.Square size={22} />
+                : <Icons.Play size={22} style={{ transform: 'translateX(-2px)' }} />}
+            </button>
           )}
 
           <LogsPanel logs={logs} />

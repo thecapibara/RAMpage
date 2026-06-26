@@ -9,7 +9,7 @@ import Icons from '../icons';
 
 export default function GpuView({
   gpuActive, gpuMode, gpuIntensity, gpuResolution, gpuOverdrive,
-  showGpuPopup, isBenchmarking, gpuBenchMode,
+  showGpuPopup, isBenchmarking, gpuBenchMode, isMobile,
   vramActive, vramCount,
   setGpuMode, setGpuIntensity, setGpuResolution, setGpuOverdrive,
   toggleGpu, openGpuPopup, handleGpuCrash,
@@ -135,11 +135,14 @@ variant={gpuActive ? 'destructive' : 'primary'}
         </div>
 
         <p className="text-xs text-fox-3 leading-relaxed mb-5">
-          Allocates 64 MB uncompressed RGBA8 textures (4096×4096) every 200 ms until VRAM is exhausted.
-          Watch the GPU process memory in the browser's task manager — it climbs fast.
+          {isMobile
+            ? 'Allocates 64 MB uncompressed RGBA8 textures (4096×4096) every 200 ms until VRAM is exhausted. Not available on mobile — mobile GPUs run out of memory after one or two textures and the renderer crashes.'
+            : 'Allocates 64 MB uncompressed RGBA8 textures (4096×4096) every 200 ms until VRAM is exhausted. Watch the GPU process memory in the browser\'s task manager — it climbs fast.'}
         </p>
         {!vramActive ? (
-          <Button variant="primary" icon="Layers" onClick={runVramBurner} disabled={busy}>Eat VRAM</Button>
+          <Button variant="primary" icon="Layers" onClick={runVramBurner} disabled={busy || isMobile}>
+            {isMobile ? 'Eat VRAM (desktop only)' : 'Eat VRAM'}
+          </Button>
         ) : (
           <Button variant="destructive" icon="Square" onClick={stopVramBurner} className="animate-pulse-soft">Stop eating ({vramCount})</Button>
         )}

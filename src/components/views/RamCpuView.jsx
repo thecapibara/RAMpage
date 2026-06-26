@@ -51,7 +51,7 @@ export default function RamCpuView({
             options={[
               { value: 'STANDARD', label: 'Standard' },
               { value: 'HASH', label: 'Hash stress' },
-              { value: 'MINIONS', label: isMobile ? 'Minions (PC only)' : 'Minions' },
+              ...(isMobile ? [] : [{ value: 'MINIONS', label: 'Minions' }]),
             ]}
             value={cpuMode}
             onChange={setCpuMode}
