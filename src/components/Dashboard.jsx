@@ -1362,7 +1362,7 @@ export default function Dashboard() {
   };
 
   const mobileDisabledViews = isMobile
-    ? ['GPU', 'SW', 'AUDIO', 'PIXEL', 'BENCH'] // crash-prone / throttled on mobile
+    ? ['BENCH'] // GPU Burner suite auto-runs 8K resolution
     : [];
 
   // Mobile FAB: per-view primary action (start/stop) for the current view
@@ -1383,6 +1383,14 @@ export default function Dashboard() {
       stop: stopStorage,
       startLabel: 'Fill disk',
       stopLabel: 'Stop fill',
+    },
+    GPU: {
+      active: gpuActive,
+      busy: fabBusy,
+      start: toggleGpu,
+      stop: toggleGpu,
+      startLabel: 'Shader test',
+      stopLabel: 'Stop shader',
     },
     NETWORK: {
       active: netActive,
@@ -1407,6 +1415,30 @@ export default function Dashboard() {
       stop: stopIdbFlood,
       startLabel: 'Flood IDB',
       stopLabel: 'Stop flood',
+    },
+    SW: {
+      active: swActive,
+      busy: fabBusy,
+      start: startSw,
+      stop: stopSw,
+      startLabel: 'Hammer SW',
+      stopLabel: 'Stop SW',
+    },
+    AUDIO: {
+      active: audioActive,
+      busy: fabBusy,
+      start: startAudio,
+      stop: stopAudio,
+      startLabel: 'DSP abuse',
+      stopLabel: 'Stop audio',
+    },
+    PIXEL: {
+      active: c2dActive,
+      busy: fabBusy,
+      start: startC2d,
+      stop: stopC2d,
+      startLabel: 'Pixel storm',
+      stopLabel: 'Stop 2D',
     },
   };
   const fabEntry = fabByView[view];
@@ -1616,6 +1648,7 @@ export default function Dashboard() {
               audioVoices={audioVoices}
               audioLength={audioLength}
               audioMode={audioMode}
+              isMobile={isMobile}
               setAudioVoices={setAudioVoices}
               setAudioLength={setAudioLength}
               setAudioMode={setAudioMode}
@@ -1631,6 +1664,7 @@ export default function Dashboard() {
               c2dRes={c2dRes}
               c2dPasses={c2dPasses}
               c2dMode={c2dMode}
+              isMobile={isMobile}
               setC2dRes={setC2dRes}
               setC2dPasses={setC2dPasses}
               setC2dMode={setC2dMode}

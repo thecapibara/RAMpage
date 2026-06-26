@@ -74,11 +74,11 @@ export default function GpuView({
               <div>
                 <Slider
                   label="Resolution"
-                  value={Math.log2(gpuResolution / 1024)} min={0} max={3} step={1}
+                  value={Math.log2(gpuResolution / 1024)} min={0} max={isMobile ? 2 : 3} step={1}
                   onChange={(v) => setGpuResolution(1024 * Math.pow(2, v))} disabled={busy}
                 />
                 <div className="flex justify-between text-[10px] text-fox-3 mt-1.5">
-                  <span>1K</span><span>2K</span><span>4K</span><span>8K</span>
+                  <span>1K</span><span>2K</span><span>4K</span>{!isMobile && <span>8K</span>}
                 </div>
               </div>
               <Slider
