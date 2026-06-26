@@ -24,11 +24,14 @@ const RES_OPTIONS = [
 
 export default function Canvas2dView({
   c2dActive, c2dStats,
-  c2dRes, c2dPasses, c2dMode,
+  c2dRes, c2dPasses, c2dMode, isMobile,
   setC2dRes, setC2dPasses, setC2dMode,
   startC2d, stopC2d,
 }) {
   const running = c2dActive;
+  const resOpts = isMobile
+    ? RES_OPTIONS.filter((o) => o.v <= 4096)
+    : RES_OPTIONS;
 
   return (
     <div className="space-y-4">
@@ -83,7 +86,7 @@ export default function Canvas2dView({
         <div className="mb-5">
           <div className="label mb-2">Canvas resolution</div>
           <div className="inline-flex flex-wrap gap-0.5 p-1 bg-ink-1 rounded-lg border border-line">
-            {RES_OPTIONS.map((m) => (
+            {resOpts.map((m) => (
               <button
                 key={m.v}
                 type="button"
@@ -104,7 +107,7 @@ export default function Canvas2dView({
           <Slider
             label="Passes per frame"
             value={c2dPasses}
-            min={1} max={50} step={1}
+            min={1} max={isMobile ? 20 : 50} step={1}
             onChange={setC2dPasses}
             disabled={running}
           />

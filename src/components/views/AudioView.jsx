@@ -17,7 +17,7 @@ function Stat({ label, value, unit, accent }) {
 
 export default function AudioView({
   audioActive, audioStats,
-  audioVoices, audioLength, audioMode,
+  audioVoices, audioLength, audioMode, isMobile,
   setAudioVoices, setAudioLength, setAudioMode,
   startAudio, stopAudio,
 }) {
@@ -76,8 +76,8 @@ export default function AudioView({
 
         {/* controls */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-7">
-          <Slider label="Concurrent voices" value={audioVoices} min={1} max={64} step={1} onChange={setAudioVoices} disabled={running} />
-          <Slider label="Render length" value={audioLength} min={0.5} max={30} step={0.5} suffix=" s" onChange={setAudioLength} disabled={running} />
+          <Slider label="Concurrent voices" value={audioVoices} min={1} max={isMobile ? 16 : 64} step={1} onChange={setAudioVoices} disabled={running} />
+          <Slider label="Render length" value={audioLength} min={0.5} max={isMobile ? 10 : 30} step={0.5} suffix=" s" onChange={setAudioLength} disabled={running} />
         </div>
 
         {!running ? (
