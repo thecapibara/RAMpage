@@ -1019,10 +1019,12 @@ export default function Dashboard() {
       stopSw();
       stopAudio();
       stopC2d();
+      stopVramBurner();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
       setStorageCount(0);
+      setVramCount(0);
       setError(null);
       setChartDataRAM([]);
       setChartDataStorage([]);
