@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icons from './icons';
 
+const params = new URLSearchParams(window.location.search);
+
 export default function MinionWindow() {
-  const params = new URLSearchParams(window.location.search);
   const target = parseInt(params.get('target')) || 512;
-  const myId = params.get('id') || `zombie_${Math.random().toString(36).substring(2, 11)}`;
+  const [myId] = useState(() => params.get('id') || `zombie_${Math.random().toString(36).substring(2, 11)}`);
   const useWebRTC = params.get('webrtc') === 'true';
 
-  const [targetMB, setTargetMB] = useState(target);
+  const [targetMB] = useState(target);
   const [allocatedMB, setAllocatedMB] = useState(0);
   const [workers, setWorkers] = useState([]);
-  
   const workersRef = useRef([]);
   const startedRef = useRef(false);
 
@@ -109,7 +109,7 @@ export default function MinionWindow() {
         const interval = setInterval(() => {
           if (dc.readyState === 'open') {
             const junk = new Uint8Array(16 * 1024).fill(Math.random() * 255);
-            try { dc.send(junk); } catch (e) {}
+            try { dc.send(junk); } catch { /* channel closed */ }
           }
         }, 5); 
         activeIntervals.push(interval);
@@ -137,7 +137,7 @@ export default function MinionWindow() {
         clearTimeout(item);
       });
       activeConnections.forEach(pc => {
-        try { pc.close(); } catch (e) {}
+        try { pc.close(); } catch { /* already closed */ }
       });
     };
   }, [useWebRTC]);

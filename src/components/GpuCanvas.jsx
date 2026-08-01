@@ -7,6 +7,18 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
     const [fps, setFps] = useState(0);
     const [contextLost, setContextLost] = useState(false);
 
+    // Keep volatile props in refs so the WebGL setup effect does not get
+    // torn down and recreated on every benchmark stage / slider tick
+    // (callback identities change per render while the benchmark runs).
+    const intensityRef = useRef(intensity);
+    intensityRef.current = intensity;
+    const overdriveRef = useRef(overdrive);
+    overdriveRef.current = overdrive;
+    const onFpsUpdateRef = useRef(onFpsUpdate);
+    onFpsUpdateRef.current = onFpsUpdate;
+    const onErrorRef = useRef(onError);
+    onErrorRef.current = onError;
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if(!canvas) return;
@@ -16,10 +28,10 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
             e.preventDefault(); // Це обов'язково, щоб мати шанс на відновлення
             console.warn("WebGL Context Lost! GPU crashed.");
             setContextLost(true);
-            if (onFpsUpdate) onFpsUpdate(0);
+            if (onFpsUpdateRef.current) onFpsUpdateRef.current(0);
             
             // Повідомляємо батьківський компонент (для бенчмарку), що стався краш
-            if (onError) onError();
+            if (onErrorRef.current) onErrorRef.current();
         };
 
         const handleContextRestored = () => {
@@ -80,7 +92,7 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
             gl.viewport(0, 0, canvas.width, canvas.height);
             gl.uniform2f(resL, canvas.width, canvas.height);
             gl.uniform1f(timeL, 10.0);
-            gl.uniform1f(intL, intensity / 100);
+            gl.uniform1f(intL, intensityRef.current / 100);
             gl.drawArrays(gl.TRIANGLES, 0, 6);
         }
 
@@ -99,7 +111,7 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
             if (now - lastTime >= 250) { 
                 const currentFps = Math.round((frameCount * 1000) / (now - lastTime));
                 setFps(currentFps);
-                if (onFpsUpdate) onFpsUpdate(currentFps); 
+                if (onFpsUpdateRef.current) onFpsUpdateRef.current(currentFps); 
                 frameCount = 0;
                 lastTime = now;
             }
@@ -108,8 +120,8 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
                 gl.viewport(0, 0, canvas.width, canvas.height);
                 gl.uniform2f(resL, canvas.width, canvas.height);
                 gl.uniform1f(timeL, time * 0.001);
-                gl.uniform1f(intL, intensity / 100); 
-                const passes = overdrive || 1;
+                gl.uniform1f(intL, intensityRef.current / 100); 
+                const passes = overdriveRef.current || 1;
                 for(let i=0; i<passes; i++) { gl.drawArrays(gl.TRIANGLES, 0, 6); }
                 frameId = requestAnimationFrame(render);
             }
@@ -125,7 +137,7 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
                 gl.deleteProgram(prog); gl.deleteShader(vs); gl.deleteShader(fsO); 
             }
         };
-    }, [active, intensity, resolution, mode, overdrive, onFpsUpdate, contextLost, onError]);
+    }, [active, resolution, mode, contextLost]);
 
     return (
         <div className="relative w-full h-full group/canvas">

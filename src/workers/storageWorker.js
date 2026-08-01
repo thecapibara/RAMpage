@@ -34,11 +34,19 @@ self.onmessage = async (e) => {
           // Якщо диск повний (Quota Exceeded)
           self.postMessage({ type: 'ERROR', msg: err.message });
           isRunning = false; 
+          if (accessHandle) {
+            accessHandle.close();
+            accessHandle = null;
+          }
         }
       }
     } catch (err) {
       self.postMessage({ type: 'ERROR', msg: err.message });
       isRunning = false;
+      if (accessHandle) {
+        accessHandle.close();
+        accessHandle = null;
+      }
     }
 
   } else if (e.data === 'STOP') {
@@ -60,7 +68,7 @@ self.onmessage = async (e) => {
       // Видаляємо файл
       await root.removeEntry('rampage_heavy.bin');
       self.postMessage({ type: 'CLEARED' });
-    } catch (err) {
+    } catch {
       // Ігноруємо помилку, якщо файлу немає
       self.postMessage({ type: 'CLEARED' });
     }

@@ -45,8 +45,6 @@ export default function Dashboard() {
   const isFillingStorageRef = useRef(false);
   const storageWorkerRef = useRef(null);
   
-  const [forceUpdateStorage, setForceUpdateStorage] = useState(0);
-  
   const [gpuActive, setGpuActive] = useState(false);
   const [gpuIntensity, setGpuIntensity] = useState(50);
   const [gpuResolution, setGpuResolution] = useState(2048);
@@ -107,7 +105,6 @@ export default function Dashboard() {
   
   // CPU Bench
   const [cpuBenchScore, setCpuBenchScore] = useState(0);
-  const [cpuBenchStage, setCpuBenchStage] = useState(0);
   const cpuBenchScoreRef = useRef(0);
   const [cpuHighScore, setCpuHighScore] = useState(0);
 
@@ -155,7 +152,7 @@ export default function Dashboard() {
   const addLog = useCallback((msg, type = 'info') => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     const safeMsg = String(msg);
-    setLogs(prev => [`[${time}] ${safeMsg}`, ...prev].slice(0, 50)); 
+    setLogs(prev => [{ time: `[${time}]`, text: safeMsg, type }, ...prev].slice(0, 50)); 
   }, []);
 
   // Sync workers ref
@@ -183,7 +180,7 @@ export default function Dashboard() {
       const r = rtcRefs.current;
       r.intervals.forEach((iv) => clearInterval(iv));
       if (r.statsTimer) clearInterval(r.statsTimer);
-      r.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+      r.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
       if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
 
       // Cleanup IndexedDB flood loop
@@ -248,14 +245,6 @@ export default function Dashboard() {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-
-  // Force Storage UI update loop
-  useEffect(() => {
-      if(isFillingStorage) {
-          const interval = setInterval(() => setForceUpdateStorage(n => n+1), 200);
-          return () => clearInterval(interval);
-      }
-  }, [isFillingStorage]);
 
   // Chart Loop — interval must be stable; latest values come from refs so
   // it is not torn down and recreated on every allocation tick.
@@ -474,7 +463,7 @@ export default function Dashboard() {
           audio: false,
         });
         addLog(`WebRTC: camera stream acquired for encoding load`, 'success');
-      } catch (e) {
+      } catch {
         addLog(`WebRTC: getUserMedia denied — running data-only`, 'warning');
       }
     }
@@ -497,7 +486,7 @@ export default function Dashboard() {
       if (refs.stream) {
         try {
           refs.stream.getTracks().forEach((t) => pc1.addTrack(t, refs.stream));
-        } catch {}
+        } catch { /* track already gone — skip */ }
         pc2.ontrack = () => { /* receive & discard — still burns decode */ };
       }
 
@@ -509,7 +498,7 @@ export default function Dashboard() {
         setRtcStats((s) => ({ ...s, open: openCount, channels: channelCount }));
         const iv = setInterval(() => {
           if (dc.readyState === 'open') {
-            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch {}
+            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch { /* channel closed — drop */ }
           }
         }, rtcInterval);
         refs.intervals.push(iv);
@@ -550,7 +539,7 @@ export default function Dashboard() {
     refs.intervals.forEach((iv) => clearInterval(iv));
     refs.intervals = [];
     if (refs.statsTimer) { clearInterval(refs.statsTimer); refs.statsTimer = null; }
-    refs.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+    refs.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
     refs.pairs = [];
     if (refs.stream) { refs.stream.getTracks().forEach((t) => t.stop()); refs.stream = null; }
     const burned = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
@@ -659,7 +648,7 @@ export default function Dashboard() {
 
   const clearIdbDatabase = async () => {
     const r = idbRefs.current;
-    if (r.db) { try { r.db.close(); } catch {} r.db = null; }
+    if (r.db) { try { r.db.close(); } catch { /* db already closed */ } r.db = null; }
     await new Promise((resolve) => {
       const req = indexedDB.deleteDatabase('rampage_idb');
       req.onsuccess = () => resolve();
@@ -738,7 +727,7 @@ export default function Dashboard() {
         r.count += 1;
         // drain body so the response isn't hanging
         await res.arrayBuffer();
-      } catch (e) {
+      } catch {
         // ignore transient network errors
       }
     };
@@ -1039,6 +1028,12 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
+      // CPU benchmark cancellation inline
+      if (benchmarkInterval.current) clearInterval(benchmarkInterval.current);
+      setIsBenchmarking(false);
+      setCpuBenchScore(0);
+      cpuBenchScoreRef.current = 0;
       addLog("System reset completed.");
   }, [workers]);
 
@@ -1200,7 +1195,6 @@ export default function Dashboard() {
               return;
           }
           const current = stages[stage];
-          setCpuBenchStage(stage + 1);
           setTargetMB(current.ram);
           setCpuLoad(current.cpu);
           allocateMemory(current.ram, current.cpu);
