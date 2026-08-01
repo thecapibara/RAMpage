@@ -130,6 +130,7 @@ export default function Dashboard() {
   const vramStore = useRef([]); 
 
   const gpuBenchInterval = useRef(null);
+  const gpuCrashTimerRef = useRef(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
   const benchmarkInterval = useRef(null);
@@ -217,6 +218,7 @@ export default function Dashboard() {
       
       // Cleanup Intervals
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) clearTimeout(gpuCrashTimerRef.current);
       if (benchmarkInterval.current) clearInterval(benchmarkInterval.current);
       if (bcRef.current) bcRef.current.close();
     };
@@ -1053,6 +1055,7 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
       
       const key = `ramEater_gpuScore_${modeName}`;
       const currentHigh = Number(localStorage.getItem(key) || 0);
@@ -1071,6 +1074,7 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
       addLog("GPU Benchmark Cancelled.", 'error');
   };
 
@@ -1153,7 +1157,9 @@ export default function Dashboard() {
       
       setGpuBenchResults(newResults);
 
-      setTimeout(() => {
+      if (gpuCrashTimerRef.current) clearTimeout(gpuCrashTimerRef.current);
+      gpuCrashTimerRef.current = setTimeout(() => {
+           gpuCrashTimerRef.current = null;
            const nextStage = gpuBenchStage + 1;
            setGpuBenchStage(nextStage);
            setupGpuStage(gpuBenchMode, nextStage, newResults);
