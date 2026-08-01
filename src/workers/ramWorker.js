@@ -45,6 +45,11 @@ self.onmessage = async (e) => {
     allocMode = ramMode || 'LINEAR';
     isRunning = true;
 
+    // Reset previous allocation so re-ALLOCATE targets fresh memory
+    // instead of accumulating on top of the old store (benchmark stages).
+    memoryStore = [];
+    currentWasmInstance = null;
+
     const CHUNK_SIZE = 10; 
     const BYTES_PER_MB = 1024 * 1024;
     // 1 Wasm Page = 64KB. 10MB = 160 pages.

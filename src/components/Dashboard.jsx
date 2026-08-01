@@ -130,6 +130,7 @@ export default function Dashboard() {
   const vramStore = useRef([]); 
 
   const gpuBenchInterval = useRef(null);
+  const gpuCrashTimerRef = useRef(null);
   const [logs, setLogs] = useState([]);
   const [error, setError] = useState(null);
   const benchmarkInterval = useRef(null);
@@ -217,6 +218,7 @@ export default function Dashboard() {
       
       // Cleanup Intervals
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) clearTimeout(gpuCrashTimerRef.current);
       if (benchmarkInterval.current) clearInterval(benchmarkInterval.current);
       if (bcRef.current) bcRef.current.close();
     };
@@ -255,16 +257,22 @@ export default function Dashboard() {
       }
   }, [isFillingStorage]);
 
-  // Chart Loop
+  // Chart Loop — interval must be stable; latest values come from refs so
+  // it is not torn down and recreated on every allocation tick.
+  const allocatedMBRef = useRef(allocatedMB);
+  allocatedMBRef.current = allocatedMB;
+  const storageUsedRef = useRef(storageUsed);
+  storageUsedRef.current = storageUsed;
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setChartDataRAM(prev => [...prev, allocatedMB].slice(-60));
+      setChartDataRAM(prev => [...prev, allocatedMBRef.current].slice(-60));
       if(activeTab === 'STORAGE') {
-          setChartDataStorage(prev => [...prev, storageUsed].slice(-60));
+          setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [allocatedMB, activeTab, storageUsed]);
+  }, [activeTab]);
 
   // Broadcast Channel setup for minions
   useEffect(() => {
@@ -292,19 +300,15 @@ export default function Dashboard() {
     const mainThreadCap = 0; 
     const workerTotal = Math.max(0, target - mainThreadCap);
     
-    if (workers.length > 0) {
-        workers.forEach((w, i) => {
-            const amount = Math.min(WORKER_CAP, workerTotal - (i * WORKER_CAP));
-            if (amount > 0) w.postMessage({ 
-                action: 'ALLOCATE', 
-                targetMB: amount, 
-                id: i, 
-                cpuLoad: effectiveCpu, 
-                mode: cpuMode, 
-                ramMode: ramMode 
-            });
-        });
-        return;
+    // Terminate any previous workers so a re-allocation (e.g. benchmark
+    // stages) starts from a clean slate instead of accumulating memory on
+    // top of the previous stage's allocations. workersRef is used instead of
+    // the state so stale closures (benchmark stage loop) always see the
+    // current worker set.
+    if (workersRef.current.length > 0) {
+        workersRef.current.forEach(w => w.terminate());
+        workersRef.current = [];
+        setWorkers([]);
     }
     
     setIsAllocating(true);
@@ -337,11 +341,13 @@ export default function Dashboard() {
         
         newWorkers.push(w);
     }
+    workersRef.current = newWorkers;
     setWorkers(newWorkers);
   };
 
   const stopRAM = () => {
-      workers.forEach(w => w.terminate());
+      workersRef.current.forEach(w => w.terminate());
+      workersRef.current = [];
       setWorkers([]);
       setIsAllocating(false);
   };
@@ -1019,10 +1025,12 @@ export default function Dashboard() {
       stopSw();
       stopAudio();
       stopC2d();
+      stopVramBurner();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
       setStorageCount(0);
+      setVramCount(0);
       setError(null);
       setChartDataRAM([]);
       setChartDataStorage([]);
@@ -1053,6 +1061,7 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
       
       const key = `ramEater_gpuScore_${modeName}`;
       const currentHigh = Number(localStorage.getItem(key) || 0);
@@ -1071,6 +1080,7 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
       addLog("GPU Benchmark Cancelled.", 'error');
   };
 
@@ -1153,7 +1163,9 @@ export default function Dashboard() {
       
       setGpuBenchResults(newResults);
 
-      setTimeout(() => {
+      if (gpuCrashTimerRef.current) clearTimeout(gpuCrashTimerRef.current);
+      gpuCrashTimerRef.current = setTimeout(() => {
+           gpuCrashTimerRef.current = null;
            const nextStage = gpuBenchStage + 1;
            setGpuBenchStage(nextStage);
            setupGpuStage(gpuBenchMode, nextStage, newResults);
