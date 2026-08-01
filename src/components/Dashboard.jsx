@@ -1039,6 +1039,12 @@ export default function Dashboard() {
       setShowGpuPopup(false);
       setGpuActive(false);
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
+      if (gpuCrashTimerRef.current) { clearTimeout(gpuCrashTimerRef.current); gpuCrashTimerRef.current = null; }
+      // CPU benchmark cancellation inline
+      if (benchmarkInterval.current) clearInterval(benchmarkInterval.current);
+      setIsBenchmarking(false);
+      setCpuBenchScore(0);
+      cpuBenchScoreRef.current = 0;
       addLog("System reset completed.");
   }, [workers]);
 
