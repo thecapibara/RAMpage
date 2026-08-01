@@ -292,19 +292,15 @@ export default function Dashboard() {
     const mainThreadCap = 0; 
     const workerTotal = Math.max(0, target - mainThreadCap);
     
-    if (workers.length > 0) {
-        workers.forEach((w, i) => {
-            const amount = Math.min(WORKER_CAP, workerTotal - (i * WORKER_CAP));
-            if (amount > 0) w.postMessage({ 
-                action: 'ALLOCATE', 
-                targetMB: amount, 
-                id: i, 
-                cpuLoad: effectiveCpu, 
-                mode: cpuMode, 
-                ramMode: ramMode 
-            });
-        });
-        return;
+    // Terminate any previous workers so a re-allocation (e.g. benchmark
+    // stages) starts from a clean slate instead of accumulating memory on
+    // top of the previous stage's allocations. workersRef is used instead of
+    // the state so stale closures (benchmark stage loop) always see the
+    // current worker set.
+    if (workersRef.current.length > 0) {
+        workersRef.current.forEach(w => w.terminate());
+        workersRef.current = [];
+        setWorkers([]);
     }
     
     setIsAllocating(true);
@@ -337,11 +333,13 @@ export default function Dashboard() {
         
         newWorkers.push(w);
     }
+    workersRef.current = newWorkers;
     setWorkers(newWorkers);
   };
 
   const stopRAM = () => {
-      workers.forEach(w => w.terminate());
+      workersRef.current.forEach(w => w.terminate());
+      workersRef.current = [];
       setWorkers([]);
       setIsAllocating(false);
   };
