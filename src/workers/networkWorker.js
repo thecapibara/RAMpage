@@ -2,7 +2,7 @@ let isRunning = false;
 let totalBytes = 0;
 let statsTimer = null;
 
-const runDownloader = async (id) => {
+const runDownloader = async () => {
   const targetUrl = 'https://speed.cloudflare.com/__down?bytes=52428800'; // 50MB Chunks
   
   while (isRunning) {
@@ -17,7 +17,7 @@ const runDownloader = async (id) => {
           if (done) break;
           if (value) totalBytes += value.length;
       }
-    } catch (e) {
+    } catch {
       await new Promise(r => setTimeout(r, 100));
     }
   }
@@ -31,7 +31,7 @@ const runFlooder = async () => {
                cache: 'no-store' 
            });
            totalBytes += 500; 
-       } catch(e) { await new Promise(r => setTimeout(r, 50)); }
+       } catch { await new Promise(r => setTimeout(r, 50)); }
    }
 };
 

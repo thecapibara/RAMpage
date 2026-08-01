@@ -105,7 +105,6 @@ export default function Dashboard() {
   
   // CPU Bench
   const [cpuBenchScore, setCpuBenchScore] = useState(0);
-  const [cpuBenchStage, setCpuBenchStage] = useState(0);
   const cpuBenchScoreRef = useRef(0);
   const [cpuHighScore, setCpuHighScore] = useState(0);
 
@@ -181,7 +180,7 @@ export default function Dashboard() {
       const r = rtcRefs.current;
       r.intervals.forEach((iv) => clearInterval(iv));
       if (r.statsTimer) clearInterval(r.statsTimer);
-      r.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+      r.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
       if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
 
       // Cleanup IndexedDB flood loop
@@ -464,7 +463,7 @@ export default function Dashboard() {
           audio: false,
         });
         addLog(`WebRTC: camera stream acquired for encoding load`, 'success');
-      } catch (e) {
+      } catch {
         addLog(`WebRTC: getUserMedia denied — running data-only`, 'warning');
       }
     }
@@ -487,7 +486,7 @@ export default function Dashboard() {
       if (refs.stream) {
         try {
           refs.stream.getTracks().forEach((t) => pc1.addTrack(t, refs.stream));
-        } catch {}
+        } catch { /* track already gone — skip */ }
         pc2.ontrack = () => { /* receive & discard — still burns decode */ };
       }
 
@@ -499,7 +498,7 @@ export default function Dashboard() {
         setRtcStats((s) => ({ ...s, open: openCount, channels: channelCount }));
         const iv = setInterval(() => {
           if (dc.readyState === 'open') {
-            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch {}
+            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch { /* channel closed — drop */ }
           }
         }, rtcInterval);
         refs.intervals.push(iv);
@@ -540,7 +539,7 @@ export default function Dashboard() {
     refs.intervals.forEach((iv) => clearInterval(iv));
     refs.intervals = [];
     if (refs.statsTimer) { clearInterval(refs.statsTimer); refs.statsTimer = null; }
-    refs.pairs.forEach((pc) => { try { pc.close(); } catch {} });
+    refs.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
     refs.pairs = [];
     if (refs.stream) { refs.stream.getTracks().forEach((t) => t.stop()); refs.stream = null; }
     const burned = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
@@ -649,7 +648,7 @@ export default function Dashboard() {
 
   const clearIdbDatabase = async () => {
     const r = idbRefs.current;
-    if (r.db) { try { r.db.close(); } catch {} r.db = null; }
+    if (r.db) { try { r.db.close(); } catch { /* db already closed */ } r.db = null; }
     await new Promise((resolve) => {
       const req = indexedDB.deleteDatabase('rampage_idb');
       req.onsuccess = () => resolve();
@@ -728,7 +727,7 @@ export default function Dashboard() {
         r.count += 1;
         // drain body so the response isn't hanging
         await res.arrayBuffer();
-      } catch (e) {
+      } catch {
         // ignore transient network errors
       }
     };
@@ -1196,7 +1195,6 @@ export default function Dashboard() {
               return;
           }
           const current = stages[stage];
-          setCpuBenchStage(stage + 1);
           setTargetMB(current.ram);
           setCpuLoad(current.cpu);
           allocateMemory(current.ram, current.cpu);

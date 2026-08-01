@@ -78,13 +78,13 @@ self.onmessage = async (e) => {
                     // Розширюємо існуючу (+10МБ)
                     currentWasmInstance.grow(PAGES_PER_CHUNK);
                 }
-            } catch (e) {
+            } catch {
                 // Якщо одна Wasm пам'ять заповнена (ліміт зазвичай 2GB-4GB), створюємо нову
                 // Це дозволяє обійти ліміт однієї Wasm інстанції
                 try {
                     currentWasmInstance = new WebAssembly.Memory({ initial: PAGES_PER_CHUNK });
                     memoryStore.push(currentWasmInstance);
-                } catch (fatal) {
+                } catch {
                     throw new Error("Wasm Memory Limit Reached (Global)");
                 }
             }
@@ -118,7 +118,7 @@ self.onmessage = async (e) => {
     isRunning = false;
     memoryStore = []; 
     currentWasmInstance = null; // Скидаємо посилання на Wasm
-    try { if(globalThis.gc) globalThis.gc(); } catch(e){} 
+    try { if(globalThis.gc) globalThis.gc(); } catch { /* gc() optional */ }
     if(action === 'CLEAR') self.postMessage({ type: 'CLEARED', id });
   }
 };

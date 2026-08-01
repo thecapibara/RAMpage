@@ -68,7 +68,7 @@ self.onmessage = async (e) => {
       // Видаляємо файл
       await root.removeEntry('rampage_heavy.bin');
       self.postMessage({ type: 'CLEARED' });
-    } catch (err) {
+    } catch {
       // Ігноруємо помилку, якщо файлу немає
       self.postMessage({ type: 'CLEARED' });
     }

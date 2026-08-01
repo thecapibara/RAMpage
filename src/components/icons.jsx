@@ -6,6 +6,9 @@ const IconBase = ({ size = 24, children, className = "" }) => (
   </svg>
 );
 
+// Icons is a shared registry of component-like icons; it is consumed as an
+// object by every view, so fast-refresh must not require component-only exports.
+// eslint-disable-next-line react-refresh/only-export-components
 export const Icons = {
   Trash2: (p) => <IconBase {...p}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></IconBase>,
   Play: (p) => <IconBase {...p}><polygon points="5 3 19 12 5 21 5 3"/></IconBase>,

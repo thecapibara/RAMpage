@@ -17,7 +17,7 @@ export default function LogsPanel({ logs }) {
       ta.style.opacity = '0';
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand('copy'); } catch {}
+      try { document.execCommand('copy'); } catch { /* clipboard API unsupported */ }
       document.body.removeChild(ta);
     }
     setCopied(true);
