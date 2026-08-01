@@ -257,16 +257,22 @@ export default function Dashboard() {
       }
   }, [isFillingStorage]);
 
-  // Chart Loop
+  // Chart Loop — interval must be stable; latest values come from refs so
+  // it is not torn down and recreated on every allocation tick.
+  const allocatedMBRef = useRef(allocatedMB);
+  allocatedMBRef.current = allocatedMB;
+  const storageUsedRef = useRef(storageUsed);
+  storageUsedRef.current = storageUsed;
+
   useEffect(() => {
     const interval = setInterval(() => {
-      setChartDataRAM(prev => [...prev, allocatedMB].slice(-60));
+      setChartDataRAM(prev => [...prev, allocatedMBRef.current].slice(-60));
       if(activeTab === 'STORAGE') {
-          setChartDataStorage(prev => [...prev, storageUsed].slice(-60));
+          setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [allocatedMB, activeTab, storageUsed]);
+  }, [activeTab]);
 
   // Broadcast Channel setup for minions
   useEffect(() => {
