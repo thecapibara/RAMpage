@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icons from './icons';
 
+const params = new URLSearchParams(window.location.search);
+
 export default function MinionWindow() {
-  const params = new URLSearchParams(window.location.search);
   const target = parseInt(params.get('target')) || 512;
-  const myId = params.get('id') || `zombie_${Math.random().toString(36).substring(2, 11)}`;
+  const [myId] = useState(() => params.get('id') || `zombie_${Math.random().toString(36).substring(2, 11)}`);
   const useWebRTC = params.get('webrtc') === 'true';
 
   const [targetMB, setTargetMB] = useState(target);
   const [allocatedMB, setAllocatedMB] = useState(0);
   const [workers, setWorkers] = useState([]);
-  
   const workersRef = useRef([]);
   const startedRef = useRef(false);
 
