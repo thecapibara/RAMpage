@@ -45,8 +45,6 @@ export default function Dashboard() {
   const isFillingStorageRef = useRef(false);
   const storageWorkerRef = useRef(null);
   
-  const [forceUpdateStorage, setForceUpdateStorage] = useState(0);
-  
   const [gpuActive, setGpuActive] = useState(false);
   const [gpuIntensity, setGpuIntensity] = useState(50);
   const [gpuResolution, setGpuResolution] = useState(2048);
@@ -248,14 +246,6 @@ export default function Dashboard() {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-
-  // Force Storage UI update loop
-  useEffect(() => {
-      if(isFillingStorage) {
-          const interval = setInterval(() => setForceUpdateStorage(n => n+1), 200);
-          return () => clearInterval(interval);
-      }
-  }, [isFillingStorage]);
 
   // Chart Loop — interval must be stable; latest values come from refs so
   // it is not torn down and recreated on every allocation tick.
