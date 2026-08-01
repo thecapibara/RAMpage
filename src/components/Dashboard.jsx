@@ -155,7 +155,7 @@ export default function Dashboard() {
   const addLog = useCallback((msg, type = 'info') => {
     const time = new Date().toLocaleTimeString('en-US', { hour12: false });
     const safeMsg = String(msg);
-    setLogs(prev => [`[${time}] ${safeMsg}`, ...prev].slice(0, 50)); 
+    setLogs(prev => [{ time: `[${time}]`, text: safeMsg, type }, ...prev].slice(0, 50)); 
   }, []);
 
   // Sync workers ref

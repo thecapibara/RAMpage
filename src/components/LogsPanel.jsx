@@ -7,7 +7,7 @@ export default function LogsPanel({ logs }) {
   const last = logs[0];
 
   const copyLogs = async () => {
-    const text = logs.slice().reverse().join('\n');
+    const text = logs.slice().reverse().map(l => `${l.time} ${l.text}`).join('\n');
     try {
       await navigator.clipboard.writeText(text);
     } catch {
@@ -66,17 +66,17 @@ export default function LogsPanel({ logs }) {
             </div>
           ) : (
             logs.map((l, i) => {
-              const s = String(l);
-              const isError = s.includes('Error');
-              const isWarn = s.includes('warning') || s.includes('Warning');
+              const s = String(l.text ?? l);
+              const isError = l.type === 'error' || s.includes('Error');
+              const isWarn = l.type === 'warn' || s.includes('warning') || s.includes('Warning');
               const isHash = s.includes('⛏️');
-              const isOk = s.includes('success') || s.includes('Complete') || isHash;
+              const isOk = l.type === 'success' || s.includes('success') || s.includes('Complete') || isHash;
               const cls = isError ? 'text-red' : isOk ? 'text-lime' : isWarn ? 'text-amber' : 'text-fox-2';
-              const ts = s.match(/^\[([^\]]+)\]/);
-              const rest = ts ? s.slice(ts[0].length) : s;
+              const time = l.time ?? (s.match(/^\[([^\]]+)\]/)?.[0] ?? '---------');
+              const rest = l.time ? l.text : (s.match(/^\[[^\]]+\]\s*(.*)/)?.[1] ?? s);
               return (
                 <div key={i} className="flex gap-2 py-0.5 hover:bg-white/[.02] -mx-2 px-2 rounded transition-colors">
-                  <span className="text-fox-3 shrink-0 select-none">{ts ? `[${ts[1]}]` : '---------'}</span>
+                  <span className="text-fox-3 shrink-0 select-none">{time}</span>
                   <span className={cls}>{rest}</span>
                 </div>
               );
@@ -86,7 +86,7 @@ export default function LogsPanel({ logs }) {
       )}
       {!open && last && (
         <div className="px-4 py-2.5 mono text-xs text-fox-2 truncate">
-          <span className="text-fox-3">&gt;</span> {last}
+          <span className="text-fox-3">&gt;</span> {last.time} {last.text}
         </div>
       )}
     </div>
