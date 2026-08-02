@@ -291,8 +291,7 @@ export default function Dashboard() {
   // --- WORKERS & STORAGE LOGIC ---
   const allocateMemory = async (target = targetMB, cpu = cpuLoad) => {
     const effectiveCpu = cpuMode === 'HASH' ? 100 : cpu; 
-    const mainThreadCap = 0; 
-    const workerTotal = Math.max(0, target - mainThreadCap);
+    const workerTotal = Math.max(0, target);
     
     // Terminate any previous workers so a re-allocation (e.g. benchmark
     // stages) starts from a clean slate instead of accumulating memory on
@@ -647,12 +646,9 @@ export default function Dashboard() {
             await new Promise((res) => setTimeout(res, 200));
           }
         }
-        yieldToUI();
         await new Promise((res) => setTimeout(res, 0));
       }
     };
-
-    const yieldToUI = () => {};
     loop();
   };
 

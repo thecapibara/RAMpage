@@ -113,12 +113,5 @@ self.onmessage = async (e) => {
     } catch (err) { 
         self.postMessage({ type: 'ERROR', error: err.message, id });
     }
-
-  } else if (action === 'STOP' || action === 'CLEAR') { 
-    isRunning = false;
-    memoryStore = []; 
-    currentWasmInstance = null; // Скидаємо посилання на Wasm
-    try { if(globalThis.gc) globalThis.gc(); } catch { /* gc() optional */ }
-    if(action === 'CLEAR') self.postMessage({ type: 'CLEARED', id });
   }
 };
