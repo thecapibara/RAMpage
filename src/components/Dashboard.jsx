@@ -72,6 +72,10 @@ export default function Dashboard() {
   const [idbChunk, setIdbChunk] = useState(8);
   const [idbStores, setIdbStores] = useState(5);
   const idbRefs = useRef({ db: null, loop: null, cancel: false, bytes: 0, objects: 0, lastBytes: 0, lastTime: 0, statsTimer: null });
+  // Pending DB wipe scheduled by stopIdbFlood — must be cancelled when a new
+  // flood starts, otherwise it would delete the freshly opened database
+  // (stopIdbFlood wipes via deleteDatabase after a 100ms delay).
+  const idbClearTimerRef = useRef(null);
 
   // Service Worker Hammer State
   const [swActive, setSwActive] = useState(false);
@@ -186,6 +190,7 @@ export default function Dashboard() {
       // Cleanup IndexedDB flood loop
       if (idbRefs.current.statsTimer) clearInterval(idbRefs.current.statsTimer);
       idbRefs.current.cancel = true;
+      if (idbClearTimerRef.current) { clearTimeout(idbClearTimerRef.current); idbClearTimerRef.current = null; }
 
       // Cleanup Service Worker hammer
       const s = swRefs.current;
@@ -286,8 +291,7 @@ export default function Dashboard() {
   // --- WORKERS & STORAGE LOGIC ---
   const allocateMemory = async (target = targetMB, cpu = cpuLoad) => {
     const effectiveCpu = cpuMode === 'HASH' ? 100 : cpu; 
-    const mainThreadCap = 0; 
-    const workerTotal = Math.max(0, target - mainThreadCap);
+    const workerTotal = Math.max(0, target);
     
     // Terminate any previous workers so a re-allocation (e.g. benchmark
     // stages) starts from a clean slate instead of accumulating memory on
@@ -551,6 +555,11 @@ export default function Dashboard() {
   // --- INDEXEDDB FLOOD ---
   const startIdbFlood = async () => {
     if (idbActive) return;
+    // Cancel any pending stop-wipe: it would delete the DB we're about to open
+    if (idbClearTimerRef.current) {
+      clearTimeout(idbClearTimerRef.current);
+      idbClearTimerRef.current = null;
+    }
     const r = idbRefs.current;
     r.cancel = false;
     r.bytes = 0;
@@ -637,12 +646,9 @@ export default function Dashboard() {
             await new Promise((res) => setTimeout(res, 200));
           }
         }
-        yieldToUI();
         await new Promise((res) => setTimeout(res, 0));
       }
     };
-
-    const yieldToUI = () => {};
     loop();
   };
 
@@ -665,7 +671,11 @@ export default function Dashboard() {
     setIdbActive(false);
     addLog(`IndexedDB flood stopping…`);
     // small delay to let pending tx finish, then wipe
-    setTimeout(() => clearIdbDatabase(), 100);
+    if (idbClearTimerRef.current) clearTimeout(idbClearTimerRef.current);
+    idbClearTimerRef.current = setTimeout(() => {
+      idbClearTimerRef.current = null;
+      clearIdbDatabase();
+    }, 100);
   };
 
   // --- SERVICE WORKER HAMMER ---
@@ -1114,15 +1124,20 @@ export default function Dashboard() {
       
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
       
+      // Countdown lives in a local var, NOT inside the state updater:
+      // updaters must stay pure — StrictMode double-invokes them in dev,
+      // and calling clearInterval/recordGpuResult inside one would
+      // record the stage twice / advance the suite twice.
+      let timeLeft = 20;
       gpuBenchInterval.current = setInterval(() => {
-          setGpuBenchTimeLeft(prev => {
-              if (prev <= 1) {
-                  clearInterval(gpuBenchInterval.current);
-                  recordGpuResult(mode, stageIdx, currentResults);
-                  return 0;
-              }
-              return prev - 1;
-          });
+          timeLeft -= 1;
+          if (timeLeft <= 0) {
+              clearInterval(gpuBenchInterval.current);
+              setGpuBenchTimeLeft(0);
+              recordGpuResult(mode, stageIdx, currentResults);
+              return;
+          }
+          setGpuBenchTimeLeft(timeLeft);
       }, 1000);
   }, [recordGpuResult]);
 
