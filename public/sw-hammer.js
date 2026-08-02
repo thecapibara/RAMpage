@@ -4,7 +4,7 @@
 
 const CACHE_NAME = 'rampage-sw-hammer';
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
