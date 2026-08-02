@@ -72,6 +72,10 @@ export default function Dashboard() {
   const [idbChunk, setIdbChunk] = useState(8);
   const [idbStores, setIdbStores] = useState(5);
   const idbRefs = useRef({ db: null, loop: null, cancel: false, bytes: 0, objects: 0, lastBytes: 0, lastTime: 0, statsTimer: null });
+  // Pending DB wipe scheduled by stopIdbFlood — must be cancelled when a new
+  // flood starts, otherwise it would delete the freshly opened database
+  // (stopIdbFlood wipes via deleteDatabase after a 100ms delay).
+  const idbClearTimerRef = useRef(null);
 
   // Service Worker Hammer State
   const [swActive, setSwActive] = useState(false);
@@ -186,6 +190,7 @@ export default function Dashboard() {
       // Cleanup IndexedDB flood loop
       if (idbRefs.current.statsTimer) clearInterval(idbRefs.current.statsTimer);
       idbRefs.current.cancel = true;
+      if (idbClearTimerRef.current) { clearTimeout(idbClearTimerRef.current); idbClearTimerRef.current = null; }
 
       // Cleanup Service Worker hammer
       const s = swRefs.current;
@@ -551,6 +556,11 @@ export default function Dashboard() {
   // --- INDEXEDDB FLOOD ---
   const startIdbFlood = async () => {
     if (idbActive) return;
+    // Cancel any pending stop-wipe: it would delete the DB we're about to open
+    if (idbClearTimerRef.current) {
+      clearTimeout(idbClearTimerRef.current);
+      idbClearTimerRef.current = null;
+    }
     const r = idbRefs.current;
     r.cancel = false;
     r.bytes = 0;
@@ -665,7 +675,11 @@ export default function Dashboard() {
     setIdbActive(false);
     addLog(`IndexedDB flood stopping…`);
     // small delay to let pending tx finish, then wipe
-    setTimeout(() => clearIdbDatabase(), 100);
+    if (idbClearTimerRef.current) clearTimeout(idbClearTimerRef.current);
+    idbClearTimerRef.current = setTimeout(() => {
+      idbClearTimerRef.current = null;
+      clearIdbDatabase();
+    }, 100);
   };
 
   // --- SERVICE WORKER HAMMER ---
