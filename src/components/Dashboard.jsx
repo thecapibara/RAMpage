@@ -1114,15 +1114,20 @@ export default function Dashboard() {
       
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
       
+      // Countdown lives in a local var, NOT inside the state updater:
+      // updaters must stay pure — StrictMode double-invokes them in dev,
+      // and calling clearInterval/recordGpuResult inside one would
+      // record the stage twice / advance the suite twice.
+      let timeLeft = 20;
       gpuBenchInterval.current = setInterval(() => {
-          setGpuBenchTimeLeft(prev => {
-              if (prev <= 1) {
-                  clearInterval(gpuBenchInterval.current);
-                  recordGpuResult(mode, stageIdx, currentResults);
-                  return 0;
-              }
-              return prev - 1;
-          });
+          timeLeft -= 1;
+          if (timeLeft <= 0) {
+              clearInterval(gpuBenchInterval.current);
+              setGpuBenchTimeLeft(0);
+              recordGpuResult(mode, stageIdx, currentResults);
+              return;
+          }
+          setGpuBenchTimeLeft(timeLeft);
       }, 1000);
   }, [recordGpuResult]);
 
