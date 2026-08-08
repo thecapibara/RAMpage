@@ -340,6 +340,7 @@ export default function Dashboard() {
       workersRef.current = [];
       setWorkers([]);
       setIsAllocating(false);
+      setAllocatedMB(0);
   };
 
   // --- OPFS STORAGE LOGIC ---
