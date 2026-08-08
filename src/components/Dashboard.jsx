@@ -27,7 +27,6 @@ import {
 export default function Dashboard() {
   const [cpuMode, setCpuMode] = useState('STANDARD');
   const [ramMode, setRamMode] = useState('LINEAR');
-  const [activeTab, setActiveTab] = useState('RAM');
   const [view, setView] = useState('RAM');
   const [targetMB, setTargetMB] = useState(4096);
   const [cpuLoad, setCpuLoad] = useState(0); 
@@ -261,12 +260,10 @@ export default function Dashboard() {
   useEffect(() => {
     const interval = setInterval(() => {
       setChartDataRAM(prev => [...prev, allocatedMBRef.current].slice(-60));
-      if(activeTab === 'STORAGE') {
-          setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
-      }
+      setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, []);
 
   // Broadcast Channel setup for minions
   useEffect(() => {
@@ -1187,7 +1184,6 @@ export default function Dashboard() {
       if (isBenchmarking) return;
       clearAll();
       setIsBenchmarking(true);
-      setActiveTab('RAM');
       setCpuBenchScore(0);
       cpuBenchScoreRef.current = 0;
       
@@ -1379,7 +1375,6 @@ export default function Dashboard() {
 
   const toggleGpu = () => {
     setGpuActive(!gpuActive);
-    setActiveTab('GPU');
   };
 
   const mobileDisabledViews = isMobile
