@@ -27,7 +27,6 @@ import {
 export default function Dashboard() {
   const [cpuMode, setCpuMode] = useState('STANDARD');
   const [ramMode, setRamMode] = useState('LINEAR');
-  const [activeTab, setActiveTab] = useState('RAM');
   const [view, setView] = useState('RAM');
   const [targetMB, setTargetMB] = useState(4096);
   const [cpuLoad, setCpuLoad] = useState(0); 
@@ -56,6 +55,9 @@ export default function Dashboard() {
   const [netActive, setNetActive] = useState(false);
   const [netStats, setNetStats] = useState({ speed: 0, total: 0 });
   const networkWorkerRef = useRef(null);
+  // Live total (bytes) for stop/cleanup logs — state would be stale in
+  // memoized callbacks.
+  const netTotalRef = useRef(0);
 
   // WebRTC Mesh Storm State
   const [rtcActive, setRtcActive] = useState(false);
@@ -142,6 +144,9 @@ export default function Dashboard() {
   const [minions, setMinions] = useState([]); 
   const [minionWebRTC, setMinionWebRTC] = useState(false);
   const bcRef = useRef(null);
+  // Live list so killMinions (also called from memoized clearAll) always
+  // sees the current minion windows.
+  const minionsRef = useRef([]);
 
   // Confirmation Modal state
   const [confirmModal, setConfirmModal] = useState({
@@ -163,6 +168,11 @@ export default function Dashboard() {
   useEffect(() => {
     workersRef.current = workers;
   }, [workers]);
+
+  // Sync minions ref
+  useEffect(() => {
+    minionsRef.current = minions;
+  }, [minions]);
 
   // Cleanups on component unmount
   useEffect(() => {
@@ -261,12 +271,10 @@ export default function Dashboard() {
   useEffect(() => {
     const interval = setInterval(() => {
       setChartDataRAM(prev => [...prev, allocatedMBRef.current].slice(-60));
-      if(activeTab === 'STORAGE') {
-          setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
-      }
+      setChartDataStorage(prev => [...prev, storageUsedRef.current].slice(-60));
     }, 1000);
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, []);
 
   // Broadcast Channel setup for minions
   useEffect(() => {
@@ -343,6 +351,7 @@ export default function Dashboard() {
       workersRef.current = [];
       setWorkers([]);
       setIsAllocating(false);
+      setAllocatedMB(0);
   };
 
   // --- OPFS STORAGE LOGIC ---
@@ -413,6 +422,7 @@ export default function Dashboard() {
 
     worker.onmessage = (e) => {
         const currentBytes = e.data.total;
+        netTotalRef.current = currentBytes;
         const now = performance.now();
         const timeDiff = (now - lastTime) / 1000; 
 
@@ -442,7 +452,7 @@ export default function Dashboard() {
       }
       setNetActive(false);
       setNetStats(prev => ({ ...prev, speed: 0 }));
-      addLog(`Network Stress Stopped. Burned: ${netStats.total.toFixed(0)} MB`);
+      addLog(`Network Stress Stopped. Burned: ${(netTotalRef.current / (1024 * 1024)).toFixed(0)} MB`);
   };
 
   // --- WEBRTC MESH STORM ---
@@ -1015,16 +1025,20 @@ export default function Dashboard() {
     addLog(`Pixel 2D storm stopped. Frames: ${r.frames.toLocaleString()}.`);
   };
 
-  const clearAll = useCallback(() => {
+  // Plain function (not useCallback): it is only ever called from event
+  // handlers, and every stop* helper reads live values through refs, so a
+  // memoized identity would add nothing but stale-closure risk.
+  const clearAll = () => {
       stopRAM();
       clearStorage();
       stopNetworkStress();
       stopRtcStorm();
       stopIdbFlood();
-      stopSw();
+      clearSw();
       stopAudio();
       stopC2d();
       stopVramBurner();
+      killMinions();
       setGpuActive(false);
       setAllocatedMB(0);
       setStorageUsed(0);
@@ -1045,7 +1059,7 @@ export default function Dashboard() {
       setCpuBenchScore(0);
       cpuBenchScoreRef.current = 0;
       addLog("System reset completed.");
-  }, [workers]);
+  };
 
   const handleEmergencyResetConfirm = () => {
     setConfirmModal({
@@ -1060,7 +1074,7 @@ export default function Dashboard() {
   };
 
   // --- GPU BENCHMARK LOGIC ---
-  const finishGpuBenchmark = (results, modeName) => {
+  const finishGpuBenchmark = useCallback((results, modeName) => {
       const totalScore = results.reduce((acc, r) => acc + Math.round(r.avgFps * (r.res/1024) * r.od), 0);
       setGpuBenchMode('NONE');
       setShowGpuPopup(false);
@@ -1078,7 +1092,7 @@ export default function Dashboard() {
       
       setShowBenchResults(modeName); 
       addLog(`${modeName} GPU Benchmark Complete. Score: ${totalScore}`);
-  };
+  }, [addLog]);
 
   const cancelGpuBenchmark = () => {
       setGpuBenchMode('NONE');
@@ -1139,7 +1153,7 @@ export default function Dashboard() {
           }
           setGpuBenchTimeLeft(timeLeft);
       }, 1000);
-  }, [recordGpuResult]);
+  }, [recordGpuResult, finishGpuBenchmark]);
 
   const runGpuBenchmark = (mode) => {
       if (gpuBenchMode !== 'NONE') return;
@@ -1187,7 +1201,6 @@ export default function Dashboard() {
       if (isBenchmarking) return;
       clearAll();
       setIsBenchmarking(true);
-      setActiveTab('RAM');
       setCpuBenchScore(0);
       cpuBenchScoreRef.current = 0;
       
@@ -1267,7 +1280,7 @@ export default function Dashboard() {
   };
 
   const killMinions = () => {
-      minions.forEach(m => {
+      minionsRef.current.forEach(m => {
           const win = m.window; 
           if(win && !win.closed) win.close();
       });
@@ -1379,7 +1392,6 @@ export default function Dashboard() {
 
   const toggleGpu = () => {
     setGpuActive(!gpuActive);
-    setActiveTab('GPU');
   };
 
   const mobileDisabledViews = isMobile
@@ -1779,6 +1791,7 @@ export default function Dashboard() {
                   mode={gpuMode}
                   overdrive={gpuOverdrive}
                   onFpsUpdate={handleGpuFpsUpdate}
+                  onError={handleGpuCrash}
                   isPopup={true}
                 />
               </ErrorBoundary>
