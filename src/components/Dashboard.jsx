@@ -1775,6 +1775,7 @@ export default function Dashboard() {
                   mode={gpuMode}
                   overdrive={gpuOverdrive}
                   onFpsUpdate={handleGpuFpsUpdate}
+                  onError={handleGpuCrash}
                   isPopup={true}
                 />
               </ErrorBoundary>
