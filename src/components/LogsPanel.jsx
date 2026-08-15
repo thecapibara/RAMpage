@@ -32,7 +32,7 @@ export default function LogsPanel({ logs }) {
           <Icons.Terminal size={13} className="text-fox-3" />
           <span className="label">event log</span>
           {logs.length > 0 && (
-            <span className="mono text-[10px] text-fox-3">{logs.length} entries</span>
+            <span className="mono text-[10px] text-fox-3">{logs.length} {logs.length === 1 ? 'entry' : 'entries'}</span>
           )}
         </div>
         <div className="flex items-center gap-1.5">

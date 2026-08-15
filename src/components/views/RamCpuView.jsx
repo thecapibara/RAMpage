@@ -55,6 +55,7 @@ export default function RamCpuView({
             ]}
             value={cpuMode}
             onChange={setCpuMode}
+            disabled={isAllocating}
           />
         </div>
         {cpuMode !== 'MINIONS' && (
@@ -133,7 +134,7 @@ function MinionsSub({ minionSize, minionCount, minions, minionWebRTC, setMinionS
       <div className="space-y-5 mb-6">
         <Slider label="Window size" value={minionSize} min={256} max={2048} step={128} suffix=" MB" onChange={setMinionSize} />
         <div>
-          <Slider label="Count" value={minionCount} min={1} max={20} step={1} suffix=" wins" onChange={setMinionCount} />
+          <Slider label="Count" value={minionCount} min={1} max={20} step={1} suffix={minionCount === 1 ? ' window' : ' windows'} onChange={setMinionCount} />
           <div className="text-right text-[10px] text-fox-3 mt-1">Total: {(minionSize * minionCount / 1024).toFixed(1)} GB</div>
         </div>
         <label
