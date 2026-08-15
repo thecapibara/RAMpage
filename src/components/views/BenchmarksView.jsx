@@ -17,6 +17,8 @@ export default function BenchmarksView({
       <div className="lg:col-span-2">
         <Panel title="Benchmarks" status={isBenchmarking || gpuBusy ? 'active' : 'idle'}>
           <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+            {/* disabled while running: switching to GPU mid-CPU-benchmark would
+                hide the Stop button (it only exists in the CPU branch) */}
             <Segmented
               options={[
                 { value: 'CPU', label: 'CPU / RAM' },
@@ -24,6 +26,7 @@ export default function BenchmarksView({
               ]}
               value={benchType}
               onChange={setBenchType}
+              disabled={isBenchmarking || gpuBusy}
             />
             <span className="chip mono">survival suite</span>
           </div>

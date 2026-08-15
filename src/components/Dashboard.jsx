@@ -6,6 +6,7 @@ import ConfirmModal from './ConfirmModal';
 import ErrorBoundary from './ErrorBoundary';
 import Sidebar from './Sidebar';
 import LogsPanel from './LogsPanel';
+import Button from './ui/Button';
 import RamCpuView from './views/RamCpuView';
 import StorageView from './views/StorageView';
 import GpuView from './views/GpuView';
@@ -100,7 +101,7 @@ export default function Dashboard() {
   // Canvas 2D Pixel Storm State
   const [c2dActive, setC2dActive] = useState(false);
   const [c2dStats, setC2dStats] = useState({ frames: 0, pxPerFrame: 0, mpps: 0 });
-  const [c2dRes, setC2dRes] = useState(1920);
+  const [c2dRes, setC2dRes] = useState(1280); // must match a Canvas2dView RES_OPTIONS value
   const [c2dPasses, setC2dPasses] = useState(4);
   const [c2dMode, setC2dMode] = useState('xor');
   const c2dRefs = useRef({ raf: null, cancel: false, frames: 0, pxPerFrame: 0, lastTime: 0, lastFrames: 0, statsTimer: null });
@@ -297,8 +298,12 @@ export default function Dashboard() {
   }, []);
 
   // --- WORKERS & STORAGE LOGIC ---
-  const allocateMemory = async (target = targetMB, cpu = cpuLoad) => {
-    const effectiveCpu = cpuMode === 'HASH' ? 100 : cpu; 
+  const allocateMemory = async (target = targetMB, cpu = cpuLoad, modeOverride = null) => {
+    // modeOverride lets the CPU benchmark force STANDARD mode — otherwise a
+    // leftover HASH selection would pin every stage to cpu=100 + hash stress,
+    // making scores incomparable.
+    const mode = modeOverride || cpuMode;
+    const effectiveCpu = mode === 'HASH' ? 100 : cpu; 
     const workerTotal = Math.max(0, target);
     
     // Terminate any previous workers so a re-allocation (e.g. benchmark
@@ -336,7 +341,7 @@ export default function Dashboard() {
           targetMB: amount, 
           id: i, 
           cpuLoad: effectiveCpu, 
-          mode: cpuMode, 
+          mode: mode, 
           ramMode: ramMode
         });
         
@@ -347,6 +352,7 @@ export default function Dashboard() {
   };
 
   const stopRAM = () => {
+      if (!isAllocating && workersRef.current.length === 0) return;
       workersRef.current.forEach(w => w.terminate());
       workersRef.current = [];
       setWorkers([]);
@@ -373,6 +379,8 @@ export default function Dashboard() {
               setStorageCount(0);
               addLog("Storage Cleaned (OPFS).", 'success');
           }
+          // 'STOPPED' needs no handling: the worker stays alive (idle) so it
+          // can be reused for the next fill/clear without re-spawning.
       };
       
       storageWorkerRef.current = worker;
@@ -381,6 +389,10 @@ export default function Dashboard() {
 
   const fillStorage = () => {
       if (isFillingStorage) return;
+      // A new sync access handle starts writing at offset 0, so the session
+      // counter must restart — otherwise it inflates past real disk usage.
+      setStorageUsed(0);
+      setStorageCount(0);
       setIsFillingStorage(true);
       isFillingStorageRef.current = true;
       addLog("Storage: Starting High-Speed OPFS Writer...");
@@ -390,18 +402,26 @@ export default function Dashboard() {
   };
 
   const stopStorage = () => {
+      if (!isFillingStorageRef.current && !storageWorkerRef.current) return;
       setIsFillingStorage(false);
       isFillingStorageRef.current = false;
       
-      if (storageWorkerRef.current) {
-          storageWorkerRef.current.terminate();
-          storageWorkerRef.current = null; 
+      const worker = storageWorkerRef.current;
+      if (worker) {
+          // Graceful stop: the worker closes its sync access handle on STOP.
+          // Terminating without STOP leaves the handle locked, which blocks
+          // the next fill ("another open Access Handle" error). The worker is
+          // kept alive (idle) for reuse rather than terminated.
+          worker.postMessage('STOP');
       }
-      addLog("Storage Writer Stopped (Terminated).");
+      addLog("Storage Writer Stopped.");
   };
 
   const clearStorage = () => {
-      stopStorage();
+      setIsFillingStorage(false);
+      isFillingStorageRef.current = false;
+      // CLEAR closes any open handle inside the worker before deleting the
+      // file, so no separate STOP is needed (avoids a stop/clear race).
       const worker = initStorageWorker(); 
       worker.postMessage('CLEAR');
   };
@@ -446,6 +466,7 @@ export default function Dashboard() {
   };
 
   const stopNetworkStress = () => {
+      if (!netActive && !networkWorkerRef.current) return;
       if (networkWorkerRef.current) {
           networkWorkerRef.current.terminate();
           networkWorkerRef.current = null;
@@ -459,6 +480,9 @@ export default function Dashboard() {
   const startRtcStorm = async () => {
     if (rtcActive) return;
     const refs = rtcRefs.current;
+    // Run token: stopRtcStorm bumps it so every await below can detect a
+    // stop that fired mid-setup and abort instead of leaking peers/camera.
+    const runId = (refs.runId = (refs.runId || 0) + 1);
     refs.pairs = [];
     refs.intervals = [];
     refs.sentBytes = 0;
@@ -469,8 +493,10 @@ export default function Dashboard() {
     setRtcStats({ open: 0, channels: 0, mbps: 0, totalMB: 0 });
     addLog(`WebRTC: building ${rtcPeers} peer-pairs…`);
 
-    // optional media
-    if (rtcMedia) {
+    // optional media — hard-gated on desktop here, not just in the checkbox UI:
+    // rtcMedia state can stay true from a desktop session after the viewport
+    // drops to mobile width, and the masked checkbox alone wouldn't prevent this.
+    if (rtcMedia && !isMobile) {
       try {
         refs.stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -480,6 +506,11 @@ export default function Dashboard() {
       } catch {
         addLog(`WebRTC: getUserMedia denied — running data-only`, 'warning');
       }
+    }
+    // Stop may have fired during the getUserMedia await.
+    if (refs.runId !== runId) {
+      if (refs.stream) { refs.stream.getTracks().forEach((t) => t.stop()); refs.stream = null; }
+      return;
     }
 
     const payload = new Uint8Array(rtcPayload * 1024);
@@ -507,6 +538,8 @@ export default function Dashboard() {
       const dc = pc1.createDataChannel('storm', { ordered: false, maxRetransmits: 0 });
       dc.binaryType = 'arraybuffer';
       dc.onopen = () => {
+        // Stale run (stopped mid-signaling): do not start senders.
+        if (refs.runId !== runId) { try { dc.close(); } catch { /* already closed */ } return; }
         openCount += 2;
         channelCount += 1;
         setRtcStats((s) => ({ ...s, open: openCount, channels: channelCount }));
@@ -529,11 +562,14 @@ export default function Dashboard() {
       } catch (e) {
         addLog(`WebRTC: pair ${i} failed: ${e.message}`, 'warning');
       }
+      // Stop may have fired mid-signaling — abort the remaining pairs.
+      if (refs.runId !== runId) return;
     }
 
     // stats sampler
     let lastSent = 0;
     let lastTime = performance.now();
+    if (refs.statsTimer) clearInterval(refs.statsTimer);
     refs.statsTimer = setInterval(() => {
       const now = performance.now();
       const dt = (now - lastTime) / 1000;
@@ -550,6 +586,8 @@ export default function Dashboard() {
 
   const stopRtcStorm = () => {
     const refs = rtcRefs.current;
+    refs.runId = (refs.runId || 0) + 1; // invalidate any in-flight startRtcStorm
+    if (!rtcActive && refs.pairs.length === 0 && refs.intervals.length === 0 && !refs.stream && !refs.statsTimer) return;
     refs.intervals.forEach((iv) => clearInterval(iv));
     refs.intervals = [];
     if (refs.statsTimer) { clearInterval(refs.statsTimer); refs.statsTimer = null; }
@@ -571,7 +609,12 @@ export default function Dashboard() {
       idbClearTimerRef.current = null;
     }
     const r = idbRefs.current;
+    // Close any stale connection from a previous run first — otherwise the
+    // version-bumped open below is blocked by our own leftover connection
+    // (with no onblocked handler the await would hang forever).
+    if (r.db) { try { r.db.close(); } catch { /* already closed */ } r.db = null; }
     r.cancel = false;
+    const runId = (r.runId = (r.runId || 0) + 1);
     r.bytes = 0;
     r.objects = 0;
     r.lastBytes = 0;
@@ -588,11 +631,19 @@ export default function Dashboard() {
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('open blocked by another connection'));
     }).then((db) => { r.db = db; }).catch((e) => {
       addLog(`IndexedDB: open failed: ${e.message}`, 'error');
     });
 
     if (!r.db) return;
+    // A stop may have fired while we awaited the open — bail out instead of
+    // re-activating over the stop (would leave idbActive stuck true).
+    if (r.cancel || r.runId !== runId) {
+      try { r.db.close(); } catch { /* already closed */ }
+      r.db = null;
+      return;
+    }
 
     setIdbActive(true);
     setIdbStats({ storedMB: 0, objects: 0, speed: 0, openStores: idbStores });
@@ -628,7 +679,7 @@ export default function Dashboard() {
 
     // sequential async puts across rotating stores
     const loop = async () => {
-      while (!r.cancel) {
+      while (!r.cancel && r.runId === runId) {
         const blob = makeBlob();
         const storeName = `s${storeIdx}`;
         storeIdx = (storeIdx + 1) % idbStores;
@@ -647,6 +698,7 @@ export default function Dashboard() {
           if (e && e.name === 'QuotaExceededError') {
             addLog(`IndexedDB: QuotaExceededError — flooded ${r.objects} objects; clearing database`, 'warning');
             r.cancel = true;
+            if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
             await clearIdbDatabase();
             setIdbStats({ storedMB: 0, objects: 0, speed: 0, openStores: 0 });
             setIdbActive(false);
@@ -676,6 +728,7 @@ export default function Dashboard() {
 
   const stopIdbFlood = async () => {
     const r = idbRefs.current;
+    if (!idbActive && !r.db && !r.statsTimer) return;
     r.cancel = true;
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
     setIdbActive(false);
@@ -707,9 +760,12 @@ export default function Dashboard() {
 
   const startSw = async () => {
     if (swActive) return;
-    const reg = await ensureSwRegistered();
-    if (!reg) return;
     const r = swRefs.current;
+    // Run token: stopSw bumps it so a stop fired during the (slow) SW
+    // registration await aborts this start instead of being overridden.
+    const runId = (r.runId = (r.runId || 0) + 1);
+    const reg = await ensureSwRegistered();
+    if (!reg || r.runId !== runId) return;
     r.cancel = false;
     r.count = 0;
     r.cpuMsAcc = 0;
@@ -768,6 +824,8 @@ export default function Dashboard() {
 
   const stopSw = () => {
     const r = swRefs.current;
+    r.runId = (r.runId || 0) + 1; // invalidate any in-flight startSw
+    if (!swActive && !r.statsTimer) return;
     r.cancel = true;
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
     setSwActive(false);
@@ -925,6 +983,7 @@ export default function Dashboard() {
 
   const stopAudio = () => {
     const r = audioRefs.current;
+    if (!audioActive && !r.statsTimer) return;
     r.cancel = true;
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
     setAudioActive(false);
@@ -1018,6 +1077,7 @@ export default function Dashboard() {
 
   const stopC2d = () => {
     const r = c2dRefs.current;
+    if (!c2dActive && !r.raf && !r.statsTimer) return;
     r.cancel = true;
     if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
@@ -1108,16 +1168,21 @@ export default function Dashboard() {
       const config = suite[stageIdx];
       
       const validSamples = gpuBenchAvgBufferRef.current.slice(8); 
+      // Fallback is 0, NOT gpuBenchCurrentFps: a stage with <9 samples almost
+      // always means the GL context failed/was lost, and reading the state here
+      // would capture the PREVIOUS stage's final FPS (stale closure) and inflate
+      // the score. Reading from the ref buffer keeps this callback dep-free.
       const avg = validSamples.length > 0 
           ? validSamples.reduce((a,b) => a+b, 0) / validSamples.length 
-          : gpuBenchCurrentFps; 
+          : 0; 
 
       const newResult = { ...config, avgFps: avg };
       const newResults = [...currentResults, newResult];
       setGpuBenchResults(newResults);
       setGpuBenchStage(stageIdx + 1);
       setupGpuStage(mode, stageIdx + 1, newResults);
-  }, [gpuBenchCurrentFps]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setupGpuStage = useCallback((mode, stageIdx, currentResults) => {
       const suite = mode === 'LIGHT' ? LIGHT_SUITE : (mode === 'NORMAL' ? NORMAL_SUITE : BURNER_SUITE);
@@ -1225,7 +1290,7 @@ export default function Dashboard() {
           const current = stages[stage];
           setTargetMB(current.ram);
           setCpuLoad(current.cpu);
-          allocateMemory(current.ram, current.cpu);
+          allocateMemory(current.ram, current.cpu, 'STANDARD');
           
           let timeLeft = current.time;
           benchmarkInterval.current = setInterval(() => {
@@ -1280,6 +1345,7 @@ export default function Dashboard() {
   };
 
   const killMinions = () => {
+      if (minionsRef.current.length === 0) return;
       minionsRef.current.forEach(m => {
           const win = m.window; 
           if(win && !win.closed) win.close();
@@ -1356,6 +1422,7 @@ export default function Dashboard() {
   };
 
   const stopVramBurner = () => {
+      if (!vramActive && !vramContext.current) return;
       if(vramInterval.current) clearInterval(vramInterval.current);
       
       const gl = vramContext.current;

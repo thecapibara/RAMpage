@@ -1,14 +1,35 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import Icons from './icons';
 
 export default function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
+  const cancelRef = useRef(null);
+
+  // Escape closes; initial focus goes to the safe (Cancel) action so Tab
+  // stays inside the dialog instead of reaching the page behind it.
+  useEffect(() => {
+    if (!isOpen) return;
+    cancelRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onCancel]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink-0/85 p-4">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-ink-0/85 p-4"
+      onClick={onCancel}
+    >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="glass rounded-2xl p-6 max-w-md w-full"
         style={{ borderColor: 'rgba(248,113,113,.5)', boxShadow: '0 0 60px -10px rgba(248,113,113,.4), 0 1px 0 rgba(255,255,255,.05) inset' }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3 pb-4 mb-4 border-b border-line">
           <div
@@ -25,6 +46,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
         <p className="text-sm text-fox-2 mb-6 leading-relaxed">{message}</p>
         <div className="flex gap-3">
           <button
+            ref={cancelRef}
             onClick={onCancel}
             className="flex-1 bg-white/[.03] border border-line text-fox-2 font-semibold py-2.5 rounded-lg text-xs hover:text-fox hover:border-line-strong transition-colors uppercase tracking-wide"
           >

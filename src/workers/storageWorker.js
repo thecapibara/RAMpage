@@ -23,13 +23,22 @@ self.onmessage = async (e) => {
       const buffer = new Uint8Array(CHUNK_SIZE).fill(Math.random() * 255);
 
       // 5. Цикл запису
+      let chunks = 0;
       while (isRunning) {
         try {
-          // Пишемо синхронно (найшвидший спосіб у браузері)
+          // Пишемо синхронно (найшвидший спосіб у браузері).
+          // write() без {at} продовжує з поточної позиції — файл росте.
           accessHandle.write(buffer); 
           accessHandle.flush(); // Примусово зберігаємо на диск
           
           self.postMessage({ type: 'WRITTEN', mb: 10 });
+
+          // Periodically yield to the event loop so STOP/CLEAR messages
+          // can actually reach this worker (a tight sync loop would starve
+          // the message queue and graceful stop would be impossible).
+          if (++chunks % 4 === 0) {
+            await new Promise((res) => setTimeout(res, 0));
+          }
         } catch (err) {
           // Якщо диск повний (Quota Exceeded)
           self.postMessage({ type: 'ERROR', msg: err.message });

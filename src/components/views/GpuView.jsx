@@ -72,10 +72,12 @@ export default function GpuView({
                 onChange={setGpuIntensity} disabled={busy}
               />
               <div>
+                {/* displayValue: show human-readable resolution, not the raw log2 index */}
                 <Slider
                   label="Resolution"
                   value={Math.log2(gpuResolution / 1024)} min={0} max={isMobile ? 2 : 3} step={1}
                   onChange={(v) => setGpuResolution(1024 * Math.pow(2, v))} disabled={busy}
+                  displayValue={['1K', '2K', '4K', '8K'][Math.log2(gpuResolution / 1024)] || `${gpuResolution / 1024}K`}
                 />
                 <div className="flex justify-between text-[10px] text-fox-3 mt-1.5">
                   <span>1K</span><span>2K</span><span>4K</span>{!isMobile && <span>8K</span>}

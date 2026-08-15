@@ -23,6 +23,12 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         const canvas = canvasRef.current;
         if(!canvas) return;
 
+        // Inactive preview: do NOT allocate a WebGL context or a full-resolution
+        // backing store. During a benchmark the inline preview stays mounted with
+        // active=false; initializing it would silently grab a second GL context at
+        // up to 8K (~256MB) and its context-loss handler could corrupt the run.
+        if (!active) return;
+
         // 1. Обробники подій втрати/відновлення контексту
         const handleContextLost = (e) => {
             e.preventDefault(); // Це обов'язково, щоб мати шанс на відновлення
@@ -42,15 +48,22 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         canvas.addEventListener('webglcontextlost', handleContextLost, false);
         canvas.addEventListener('webglcontextrestored', handleContextRestored, false);
 
+        // Single listener teardown, reused by every early-return below so the
+        // handlers never accumulate across effect re-runs (context restore cycles).
+        const removeListeners = () => {
+            canvas.removeEventListener('webglcontextlost', handleContextLost);
+            canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+        };
+
         // Якщо контекст втрачено, не намагаємося ініціалізувати WebGL
-        if (contextLost) return;
+        if (contextLost) return removeListeners;
 
         canvas.width = resolution; 
         canvas.height = resolution;
         
         // powerPreference: "high-performance" просить систему використати дискретну відеокарту
         const gl = canvas.getContext('webgl', { powerPreference: "high-performance" });
-        if(!gl) return;
+        if(!gl) return removeListeners;
 
         const createShader = (gl, type, src) => {
             const s = gl.createShader(type);
@@ -70,7 +83,7 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         // Додаткова перевірка, бо після крашу шейдери можуть не створитись
         if (!vs || !fsO) {
             if(gl && !gl.isContextLost()) gl.deleteProgram(prog);
-            return;
+            return removeListeners;
         }
 
         gl.attachShader(prog, vs); gl.attachShader(prog, fsO);
@@ -131,10 +144,10 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
 
         return () => {
             cancelAnimationFrame(frameId);
-            canvas.removeEventListener('webglcontextlost', handleContextLost);
-            canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+            removeListeners();
             if(gl && !gl.isContextLost() && prog) { 
                 gl.deleteProgram(prog); gl.deleteShader(vs); gl.deleteShader(fsO); 
+                gl.deleteBuffer(pb);
             }
         };
     }, [active, resolution, mode, contextLost]);

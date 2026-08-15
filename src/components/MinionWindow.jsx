@@ -12,7 +12,6 @@ export default function MinionWindow() {
   const [allocatedMB, setAllocatedMB] = useState(0);
   const [workers, setWorkers] = useState([]);
   const workersRef = useRef([]);
-  const startedRef = useRef(false);
 
   // Keep workers ref updated for cleanup
   useEffect(() => {
@@ -26,11 +25,12 @@ export default function MinionWindow() {
     };
   }, []);
 
-  // Allocate memory on startup
+  // Allocate memory on startup. No startedRef guard: under React.StrictMode
+  // the effect mounts→unmounts→remounts, and the cleanup below clears the
+  // pending timer on the simulated unmount — a persisted ref would skip the
+  // re-run and the minion would never allocate. The timeout+cleanup pattern
+  // is already idempotent.
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-
     const allocateMemory = (targetVal) => {
       const WORKER_CAP = 1500;
       const workerTotal = targetVal;
