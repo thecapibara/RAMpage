@@ -3,17 +3,47 @@ import Icons from './icons';
 
 export default function ConfirmModal({ isOpen, title, message, onConfirm, onCancel }) {
   const cancelRef = useRef(null);
+  const dialogRef = useRef(null);
 
-  // Escape closes; initial focus goes to the safe (Cancel) action so Tab
-  // stays inside the dialog instead of reaching the page behind it.
+  // Escape closes; initial focus goes to the safe (Cancel) action and Tab /
+  // Shift+Tab stay trapped inside the dialog instead of reaching the page behind it.
   useEffect(() => {
     if (!isOpen) return;
+    const prevFocus = document.activeElement;
     cancelRef.current?.focus();
     const onKey = (e) => {
-      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Escape') {
+        onCancel();
+        return;
+      }
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) {
+          e.preventDefault();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
+    };
   }, [isOpen, onCancel]);
 
   if (!isOpen) return null;
@@ -24,6 +54,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
       onClick={onCancel}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -40,7 +71,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
           </div>
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wide text-fox">{title}</h2>
-            <p className="mono text-[.7rem] text-fox-3 mt-0.5">all processes will be terminated</p>
+            <p className="font-mono text-[.7rem] text-fox-3 mt-0.5">all processes will be terminated</p>
           </div>
         </div>
         <p className="text-sm text-fox-2 mb-6 leading-relaxed">{message}</p>
@@ -54,7 +85,7 @@ export default function ConfirmModal({ isOpen, title, message, onConfirm, onCanc
           </button>
           <button
             onClick={onConfirm}
-            className="flex-1 bg-red/12 text-red border border-red/40 hover:bg-red/22 hover:shadow-glow-red font-semibold py-2.5 rounded-lg text-xs transition-all uppercase tracking-wide"
+            className="flex-1 bg-red/[0.12] text-red border border-red/40 hover:bg-red/[0.22] font-semibold py-2.5 rounded-lg text-xs transition-all uppercase tracking-wide"
           >
             Confirm
           </button>

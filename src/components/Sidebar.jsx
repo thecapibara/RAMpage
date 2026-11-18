@@ -6,6 +6,7 @@ const NAV = [
   { view: 'RAM',     label: 'RAM & CPU',  icon: 'Cpu' },
   { view: 'STORAGE', label: 'Storage',    icon: 'HardDrive' },
   { view: 'GPU',     label: 'GPU',        icon: 'Monitor' },
+  { view: 'WEBGPU',  label: 'WebGPU',     icon: 'Microchip' },
   { view: 'NETWORK', label: 'Network',    icon: 'Wifi' },
   { view: 'WEBRTC',  label: 'WebRTC',     icon: 'Share2' },
   { view: 'IDB',     label: 'IndexedDB',  icon: 'Database' },
@@ -15,11 +16,36 @@ const NAV = [
   { view: 'BENCH',   label: 'Benchmarks', icon: 'Trophy' },
 ];
 
+const SAFETY_OPTIONS = [
+  { value: 0, label: 'Off' },
+  { value: 30, label: '30s' },
+  { value: 60, label: '60s' },
+  { value: 300, label: '5m' },
+];
+
+function formatCountdown(sec) {
+  if (sec >= 60) {
+    const mins = Math.floor(sec / 60);
+    const rem = sec % 60;
+    return `${mins}:${String(rem).padStart(2, '0')}`;
+  }
+  return `${sec}s`;
+}
+
 export default function Sidebar({
   view, onViewChange, status, activeViews, onReset,
   isMobile, open, onClose,
   mobileDisabled = [], // array of view ids unavailable on mobile
+  telemetry,
+  safetyDurationSec = 0,
+  setSafetyDurationSec,
+  safetyRemainingSec = null,
 }) {
+  const heapMB = telemetry?.uaMemoryMB ?? telemetry?.jsHeapUsedMB;
+  const heapLabel = telemetry?.uaMemoryMB != null ? 'UA Heap' : 'JS Heap';
+  const lagMs = telemetry?.lagMs;
+  const lagColor = lagMs > 150 ? 'text-red' : lagMs > 40 ? 'text-amber' : 'text-fox-2';
+
   const asideClass = isMobile
     ? `glass fixed z-50 inset-y-3 left-3 w-72 max-w-[85vw] rounded-xl flex flex-col overflow-hidden transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-[110%]'}`
     : 'glass w-60 shrink-0 m-3 mr-0 rounded-xl flex flex-col overflow-hidden';
@@ -45,7 +71,7 @@ export default function Sidebar({
               <h1 className="font-display text-[14px] font-bold tracking-[0.08em] leading-none">
                 <span className="text-lime">RAM</span><span className="text-fox">PAGE</span><span className="text-red">!</span>
               </h1>
-              <div className="mono text-[9px] text-fox-3 mt-1.5 tracking-tight">v5.1 • Full Stress Suite • JustGL</div>
+              <div className="font-mono text-[9px] text-fox-3 mt-1.5 tracking-tight">v6.0 • Full Stress Suite • JustGL</div>
             </div>
           </div>
           {isMobile && (
@@ -98,7 +124,68 @@ export default function Sidebar({
           <div className="flex items-center gap-2 px-1 text-xs">
             <StatusDot state={status} />
             <span className="uppercase tracking-wide font-semibold text-fox-2">{status}</span>
+            {telemetry?.crossOriginIsolated && (
+              <span
+                className="ml-auto font-mono text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-lime/10 text-lime border border-lime/30"
+                title="Cross-Origin Isolated (SharedArrayBuffer & UA memory enabled)"
+              >
+                COI
+              </span>
+            )}
           </div>
+          {telemetry && (
+            <div className="grid grid-cols-2 gap-1.5 px-2 py-1.5 rounded-md bg-ink-1/70 border border-line font-mono text-[10px]">
+              <div className="flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-fox-3">{heapLabel}</span>
+                <span className="text-fox-2 font-medium">
+                  {heapMB != null ? `${heapMB.toFixed(0)} MB` : 'n/a'}
+                </span>
+              </div>
+              <div className="flex flex-col text-right">
+                <span className="text-[9px] uppercase tracking-wider text-fox-3">Loop Lag</span>
+                <span className={`font-medium ${lagColor}`}>
+                  {lagMs != null ? `${lagMs.toFixed(0)} ms` : '—'}
+                </span>
+              </div>
+            </div>
+          )}
+          {setSafetyDurationSec && (
+            <div className="px-2 py-1.5 rounded-md bg-ink-1/70 border border-line space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-fox-3 font-semibold">
+                  <Icons.Timer size={10} />
+                  Auto-stop
+                </span>
+                {safetyRemainingSec != null && (
+                  <span
+                    className={`font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                      safetyRemainingSec <= 10
+                        ? 'bg-red/15 text-red border-red/40'
+                        : 'bg-amber/15 text-amber border-amber/30'
+                    }`}
+                  >
+                    {formatCountdown(safetyRemainingSec)}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {SAFETY_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setSafetyDurationSec(opt.value)}
+                    className={`py-1 rounded text-[10px] font-mono font-semibold transition-colors ${
+                      safetyDurationSec === opt.value
+                        ? 'bg-lime/15 text-lime border border-lime/30'
+                        : 'text-fox-3 hover:text-fox hover:bg-white/[.04] border border-transparent'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <button
             type="button"
             onClick={onReset}

@@ -37,7 +37,7 @@ export default function GpuView({
               </ErrorBoundary>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="grad-text mono text-xs tracking-[.3em] uppercase">Ready</span>
+                <span className="grad-text font-mono text-xs tracking-[.3em] uppercase">Ready</span>
               </div>
             )}
             {gpuActive && !showGpuPopup && (
@@ -113,9 +113,9 @@ variant={gpuActive ? 'destructive' : 'primary'}
             <div className="text-xs text-fox-3 mt-2">{vramCount} × 64MB textures</div>
           </div>
           <div className="flex flex-wrap gap-2 justify-end">
-            <span className="chip mono">{vramActive ? 'allocating' : 'idle'}</span>
-            {vramActive && <span className="chip mono text-lime">chunks/s pending</span>}
-            <span className="chip mono">RGBA8 · 4096²</span>
+            <span className="chip font-mono">{vramActive ? 'allocating' : 'idle'}</span>
+            {vramActive && <span className="chip font-mono text-lime">chunks/s pending</span>}
+            <span className="chip font-mono">RGBA8 · 4096²</span>
           </div>
         </div>
         <div className="h-2 rounded-full mb-6 overflow-hidden" style={{ background: 'rgba(255,255,255,.06)' }}>
@@ -128,11 +128,11 @@ variant={gpuActive ? 'destructive' : 'primary'}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <div className="rounded-lg p-3 bg-ink-3/60 border border-line">
             <div className="label mb-1.5">Texture count</div>
-            <div className="mono text-xl font-semibold text-fox">{vramCount.toLocaleString()}</div>
+            <div className="font-mono text-xl font-semibold text-fox">{vramCount.toLocaleString()}</div>
           </div>
           <div className="rounded-lg p-3 bg-ink-3/60 border border-line">
             <div className="label mb-1.5">Chunk size</div>
-            <div className="mono text-xl font-semibold text-fox">64 MB</div>
+            <div className="font-mono text-xl font-semibold text-fox">64 MB</div>
           </div>
         </div>
 

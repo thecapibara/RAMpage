@@ -8,7 +8,7 @@ function Stat({ label, value, unit, accent }) {
   return (
     <div className="rounded-xl p-4 bg-ink-3/60 border border-line">
       <div className="label mb-1.5">{label}</div>
-      <div className={`mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
+      <div className={`font-mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
         {value} {unit && <span className="text-base text-fox-3">{unit}</span>}
       </div>
     </div>
@@ -35,16 +35,16 @@ export default function SwHammerView({
     <div className="space-y-4">
       <Panel title="Service worker hammer" status={running ? 'active' : 'idle'}>
         {/* registration state — only show on actual failure */}
-        {swRegState !== 'ok' && swRegState !== 'init' && swRegState !== 'registered-before' && (
+        {swRegState !== 'ok' && swRegState !== 'ready' && swRegState !== 'init' && swRegState !== 'registered-before' && (
           <div
             className="selectable rounded-xl p-4 flex items-start gap-3 mb-6"
             style={{ background: 'rgba(248,113,113,.1)', border: '1px solid rgba(248,113,113,.4)' }}
           >
             <Icons.ShieldAlert size={16} className="text-red shrink-0 mt-0.5" />
             <p className="text-xs text-fox-2 leading-relaxed">
-              Service worker registration failed: <span className="mono text-fox">{swRegState}</span>.
-              SW requires a secure context — open via <span className="mono text-fox">http://localhost</span>
-              {' '}or <span className="mono text-fox">https://</span>.
+              Service worker registration failed: <span className="font-mono text-fox">{swRegState}</span>.
+              SW requires a secure context — open via <span className="font-mono text-fox">http://localhost</span>
+              {' '}or <span className="font-mono text-fox">https://</span>.
             </p>
           </div>
         )}
@@ -59,11 +59,11 @@ export default function SwHammerView({
 
         {/* chips */}
         <div className="flex flex-wrap gap-2 mb-6">
-          <span className="chip mono">{swMode} work</span>
-          <span className="chip mono">{swWork.toLocaleString()} iter/req</span>
-          <span className="chip mono">{(swSize/1024).toFixed(0)} KB body</span>
-          <span className="chip mono">{swRate} ms spacing</span>
-          {running && <span className="chip mono text-lime">SW active</span>}
+          <span className="chip font-mono">{swMode} work</span>
+          <span className="chip font-mono">{swWork.toLocaleString()} iter/req</span>
+          <span className="chip font-mono">{(swSize/1024).toFixed(0)} KB body</span>
+          <span className="chip font-mono">{swRate} ms spacing</span>
+          {running && <span className="chip font-mono text-lime">SW active</span>}
         </div>
 
         {/* mode pick */}
@@ -103,7 +103,7 @@ export default function SwHammerView({
         {!running ? (
           <div className="flex gap-3 flex-wrap">
             <Button variant="primary" icon="Bolt" onClick={startSw}>Start hammering</Button>
-            {swRegState === 'ok' && (
+            {(swRegState === 'ok' || swRegState === 'ready') && (
               <Button variant="secondary" icon="Trash2" onClick={clearSw}>Unregister SW</Button>
             )}
           </div>
@@ -115,9 +115,9 @@ export default function SwHammerView({
       <div className="glass rounded-xl p-4 flex items-start gap-3">
         <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
         <p className="text-xs text-fox-2 leading-relaxed">
-          Registers a service worker at <span className="mono text-fox">/sw-hammer.js</span> whose
-          <span className="mono text-fox"> fetch</span> handler intercepts request paths under
-          <span className="mono text-fox">/sw-hammer/*</span> and performs heavy synchronous work
+          Registers a service worker at <span className="font-mono text-fox">/sw-hammer.js</span> whose
+          <span className="font-mono text-fox"> fetch</span> handler intercepts request paths under
+          <span className="font-mono text-fox">/sw-hammer/*</span> and performs heavy synchronous work
           (CPU hot loop, SHA-256 digest churn, buffer fills, JSON serialization) before returning a
           synthetic response. The main thread fires fetches at the configured rate, which keeps the
           SW process active even when this tab is backgrounded — Chrome gives SWs up to 5 minutes of

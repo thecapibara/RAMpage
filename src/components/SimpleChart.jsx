@@ -36,7 +36,7 @@ const SimpleChart = React.memo(({ data, max, label, unit }) => {
         />
       </svg>
       <div className="absolute top-2 left-3 label">{label}</div>
-      <div className="absolute top-2 right-3 mono text-xs font-semibold text-fox">{displayVal} {unit}</div>
+      <div className="absolute top-2 right-3 font-mono text-xs font-semibold text-fox">{displayVal} {unit}</div>
     </div>
   );
 });

@@ -63,7 +63,10 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         
         // powerPreference: "high-performance" просить систему використати дискретну відеокарту
         const gl = canvas.getContext('webgl', { powerPreference: "high-performance" });
-        if(!gl) return removeListeners;
+        if (!gl) {
+            onErrorRef.current?.('WebGL context unavailable');
+            return removeListeners;
+        }
 
         const createShader = (gl, type, src) => {
             const s = gl.createShader(type);
@@ -82,19 +85,38 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         
         // Додаткова перевірка, бо після крашу шейдери можуть не створитись
         if (!vs || !fsO) {
-            if(gl && !gl.isContextLost()) gl.deleteProgram(prog);
+            if (gl && !gl.isContextLost()) {
+                gl.deleteProgram(prog);
+                if (vs) gl.deleteShader(vs);
+                if (fsO) gl.deleteShader(fsO);
+            }
+            onErrorRef.current?.('Shader compilation failed');
             return removeListeners;
         }
 
         gl.attachShader(prog, vs); gl.attachShader(prog, fsO);
-        gl.linkProgram(prog); gl.useProgram(prog);
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+            const linkErr = gl.getProgramInfoLog(prog) || 'Shader link failed';
+            console.error('WebGL program link failed:', linkErr);
+            if (!gl.isContextLost()) {
+                gl.deleteProgram(prog);
+                gl.deleteShader(vs);
+                gl.deleteShader(fsO);
+            }
+            onErrorRef.current?.(linkErr);
+            return removeListeners;
+        }
+        gl.useProgram(prog);
 
         const pb = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, pb);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
         const pl = gl.getAttribLocation(prog, "position");
-        gl.enableVertexAttribArray(pl);
-        gl.vertexAttribPointer(pl, 2, gl.FLOAT, false, 0, 0);
+        if (pl !== -1) {
+            gl.enableVertexAttribArray(pl);
+            gl.vertexAttribPointer(pl, 2, gl.FLOAT, false, 0, 0);
+        }
 
         const resL = gl.getUniformLocation(prog, "u_resolution");
         const timeL = gl.getUniformLocation(prog, "u_time");
@@ -156,14 +178,14 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
         <div className="relative w-full h-full group/canvas">
             {/* UI для Крашу */}
             {contextLost && (
-                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 text-center p-4 backdrop-blur-sm animate-in fade-in duration-300">
-                    <Icons.ShieldAlert size={48} className="text-red-500 mb-2 animate-pulse"/>
-                    <h3 className="text-xl font-bold text-red-500 font-graffiti tracking-widest animate-pulse">GPU CRASHED!</h3>
-                    <p className="text-xs text-slate-300 mb-4 font-mono">Browser killed WebGL context.<br/>Limits exceeded.</p>
+                <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-ink-0/85 text-center p-4 backdrop-blur-sm transition-opacity duration-300">
+                    <Icons.ShieldAlert size={48} className="text-red mb-2 animate-pulse"/>
+                    <h3 className="text-xl font-bold text-red font-mono tracking-widest animate-pulse">GPU CRASHED!</h3>
+                    <p className="text-xs text-fox-2 mb-4 font-mono">Browser killed WebGL context.<br/>Limits exceeded.</p>
                     {isPopup && (
                        <button 
                           onClick={() => window.location.reload()} 
-                          className="mt-4 border border-red-500 text-red-500 hover:bg-red-500 hover:text-white font-bold py-2 px-6 rounded text-xs transition-colors"
+                          className="mt-4 border border-red text-red hover:bg-red hover:text-ink-0 font-bold py-2 px-6 rounded text-xs font-mono transition-colors"
                       >
                           FORCE RELOAD PAGE
                       </button>
@@ -175,7 +197,7 @@ const GpuCanvas = React.memo(({ active, intensity, resolution, onClick, mode, is
             
             {/* FPS Counter */}
             {active && !isPopup && !contextLost && (
-                <div className="absolute top-2 right-2 z-10 bg-black/70 text-green-400 text-[10px] font-mono font-bold px-2 py-1 rounded backdrop-blur-md border border-green-500/30 pointer-events-none select-none">
+                <div className="absolute top-2 right-2 z-10 bg-ink-0/80 text-lime text-[10px] font-mono font-bold px-2 py-1 rounded backdrop-blur-md border border-lime/30 pointer-events-none select-none">
                     {fps} FPS {overdrive > 1 ? `(x${overdrive})` : ''}
                 </div>
             )}

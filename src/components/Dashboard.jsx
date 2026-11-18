@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import useSystemTelemetry from '../hooks/useSystemTelemetry';
+import useWebGpuStress from '../hooks/useWebGpuStress';
 import Icons from './icons';
 import SimpleChart from './SimpleChart';
 import GpuCanvas from './GpuCanvas';
@@ -6,10 +8,11 @@ import ConfirmModal from './ConfirmModal';
 import ErrorBoundary from './ErrorBoundary';
 import Sidebar from './Sidebar';
 import LogsPanel from './LogsPanel';
-import Button from './ui/Button';
 import RamCpuView from './views/RamCpuView';
 import StorageView from './views/StorageView';
 import GpuView from './views/GpuView';
+import WebGpuView from './views/WebGpuView';
+import Button from './ui/Button';
 import NetworkView from './views/NetworkView';
 import BenchmarksView from './views/BenchmarksView';
 import WebRtcView from './views/WebRtcView';
@@ -26,6 +29,7 @@ import {
 } from '../constants';
 
 export default function Dashboard() {
+  const telemetry = useSystemTelemetry();
   const [cpuMode, setCpuMode] = useState('STANDARD');
   const [ramMode, setRamMode] = useState('LINEAR');
   const [view, setView] = useState('RAM');
@@ -33,7 +37,11 @@ export default function Dashboard() {
   const [cpuLoad, setCpuLoad] = useState(0); 
   const [allocatedMB, setAllocatedMB] = useState(0);
   const [isAllocating, setIsAllocating] = useState(false);
+  const [ramHolding, setRamHolding] = useState(false);
   const [workers, setWorkers] = useState([]);
+  const completedWorkersRef = useRef(0);
+  const benchOpsRef = useRef(0);
+  const benchErrorRef = useRef(null);
   const [chartDataRAM, setChartDataRAM] = useState([]);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -88,7 +96,7 @@ export default function Dashboard() {
   const [swSize, setSwSize] = useState(65536);
   const [swRate, setSwRate] = useState(20);
   const [swRegState, setSwRegState] = useState('init'); // init | ok | registered-before | <error msg>
-  const swRefs = useRef({ reg: null, loop: null, cancel: false, count: 0, cpuMsAcc: 0, bytes: 0, lastTime: 0, lastCount: 0, statsTimer: null });
+  const swRefs = useRef({ reg: null, loop: null, cancel: false, count: 0, cpuMsAcc: 0, bytes: 0, lastTime: 0, lastCount: 0, lastWarnAt: 0, statsTimer: null });
 
   // AudioContext Abuse State
   const [audioActive, setAudioActive] = useState(false);
@@ -96,7 +104,7 @@ export default function Dashboard() {
   const [audioVoices, setAudioVoices] = useState(8);
   const [audioLength, setAudioLength] = useState(2);
   const [audioMode, setAudioMode] = useState('conv');
-  const audioRefs = useRef({ active: 0, renders: 0, samples: 0, totalSamples: 0, start: 0, cancel: false, statsTimer: null });
+  const audioRefs = useRef({ active: 0, renders: 0, samples: 0, totalSamples: 0, start: 0, cancel: false, runId: 0, lastWarnAt: 0, statsTimer: null });
 
   // Canvas 2D Pixel Storm State
   const [c2dActive, setC2dActive] = useState(false);
@@ -104,7 +112,7 @@ export default function Dashboard() {
   const [c2dRes, setC2dRes] = useState(1280); // must match a Canvas2dView RES_OPTIONS value
   const [c2dPasses, setC2dPasses] = useState(4);
   const [c2dMode, setC2dMode] = useState('xor');
-  const c2dRefs = useRef({ raf: null, cancel: false, frames: 0, pxPerFrame: 0, lastTime: 0, lastFrames: 0, statsTimer: null });
+  const c2dRefs = useRef({ worker: null, frames: 0, pxPerFrame: 0 });
 
   // Benchmarking
   const [benchType, setBenchType] = useState('CPU'); 
@@ -139,6 +147,16 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const benchmarkInterval = useRef(null);
 
+  // Atomics Contention State
+  const [atomicsActive, setAtomicsActive] = useState(false);
+  const [atomicsMops, setAtomicsMops] = useState(0);
+  const atomicsRefs = useRef({ workers: [], ops: 0, timer: null, lastTime: 0 });
+
+  // Safety Auto-Stop Timer State
+  const [safetyDurationSec, setSafetyDurationSec] = useState(0);
+  const [safetyTimer, setSafetyTimer] = useState(null);
+  const clearAllRef = useRef(null);
+
   // --- MINIONS LOGIC ---
   const [minionSize, setMinionSize] = useState(512); 
   const [minionCount, setMinionCount] = useState(1); 
@@ -165,6 +183,8 @@ export default function Dashboard() {
     setLogs(prev => [{ time: `[${time}]`, text: safeMsg, type }, ...prev].slice(0, 50)); 
   }, []);
 
+  const webGpu = useWebGpuStress({ onLog: addLog, onError: setError });
+
   // Sync workers ref
   useEffect(() => {
     workersRef.current = workers;
@@ -177,9 +197,24 @@ export default function Dashboard() {
 
   // Cleanups on component unmount
   useEffect(() => {
+    const r = rtcRefs.current;
+    const idb = idbRefs.current;
+    const s = swRefs.current;
+    const audio = audioRefs.current;
+    const c2 = c2dRefs.current;
+    const atomics = atomicsRefs.current;
+
     return () => {
       // Cleanup RAM Workers
       workersRef.current.forEach(w => w.terminate());
+
+      // Cleanup Atomics Workers
+      if (atomics.timer) clearInterval(atomics.timer);
+      atomics.workers.forEach((w) => {
+        try { w.postMessage({ type: 'STOP' }); } catch { /* ignore */ }
+        w.terminate();
+      });
+      atomics.workers = [];
       
       // Cleanup Storage Worker
       if (storageWorkerRef.current) {
@@ -192,31 +227,30 @@ export default function Dashboard() {
       }
 
       // Cleanup WebRTC storm
-      const r = rtcRefs.current;
       r.intervals.forEach((iv) => clearInterval(iv));
       if (r.statsTimer) clearInterval(r.statsTimer);
       r.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
       if (r.stream) r.stream.getTracks().forEach((t) => t.stop());
 
       // Cleanup IndexedDB flood loop
-      if (idbRefs.current.statsTimer) clearInterval(idbRefs.current.statsTimer);
-      idbRefs.current.cancel = true;
+      if (idb.statsTimer) clearInterval(idb.statsTimer);
+      idb.cancel = true;
       if (idbClearTimerRef.current) { clearTimeout(idbClearTimerRef.current); idbClearTimerRef.current = null; }
 
       // Cleanup Service Worker hammer
-      const s = swRefs.current;
       s.cancel = true;
       if (s.statsTimer) clearInterval(s.statsTimer);
 
       // Cleanup AudioContext abuse
-      audioRefs.current.cancel = true;
-      if (audioRefs.current.statsTimer) clearInterval(audioRefs.current.statsTimer);
+      audio.cancel = true;
+      if (audio.statsTimer) clearInterval(audio.statsTimer);
 
       // Cleanup Canvas 2D pixel storm
-      const c2 = c2dRefs.current;
-      c2.cancel = true;
-      if (c2.raf) cancelAnimationFrame(c2.raf);
-      if (c2.statsTimer) clearInterval(c2.statsTimer);
+      if (c2.worker) {
+        try { c2.worker.postMessage({ type: 'STOP' }); } catch { /* ignore */ }
+        c2.worker.terminate();
+        c2.worker = null;
+      }
       
       // Cleanup VRAM Burner
       if (vramInterval.current) clearInterval(vramInterval.current);
@@ -252,11 +286,70 @@ export default function Dashboard() {
       });
   }, []);
 
+  // Query OPFS storage status on mount so leftover files show across reloads
+  useEffect(() => {
+    let alive = true;
+    let probe = null;
+    try {
+      probe = new Worker(new URL('../workers/storageWorker.js', import.meta.url), { type: 'module' });
+      probe.onmessage = (e) => {
+        if (alive && e.data?.type === 'STATUS') {
+          setStorageUsed(e.data.sizeMB || 0);
+          setStorageCount(e.data.chunks || 0);
+        }
+        probe?.terminate();
+        probe = null;
+      };
+      probe.onerror = () => {
+        probe?.terminate();
+        probe = null;
+      };
+      probe.postMessage('STATUS');
+    } catch {
+      /* Workers unavailable */
+    }
+    return () => {
+      alive = false;
+      if (probe) probe.terminate();
+    };
+  }, []);
+
+  // Detect existing sw-hammer.js registration on mount so Unregister SW works after reload
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        let reg = await navigator.serviceWorker.getRegistration('/');
+        if (!reg || !(reg.active?.scriptURL || reg.waiting?.scriptURL || reg.installing?.scriptURL || '').includes('sw-hammer.js')) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          reg = regs.find((item) =>
+            (item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '').includes('sw-hammer.js')
+          ) || null;
+        }
+        if (!cancelled && reg) {
+          swRefs.current.reg = reg;
+          setSwRegState('ready');
+        }
+      } catch {
+        /* serviceWorker query unsupported */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Mobile check (viewport + UA fallback, live-updating)
   useEffect(() => {
     const uaMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     const mq = window.matchMedia('(max-width: 640px)');
-    const update = () => setIsMobile(uaMobile || mq.matches);
+    const update = () => {
+      const mobile = uaMobile || mq.matches;
+      setIsMobile(mobile);
+      if (mobile) {
+        setCpuMode((prev) => (prev === 'MINIONS' ? 'STANDARD' : prev));
+        setGpuResolution((prev) => (prev > 4096 ? 4096 : prev));
+      }
+    };
     update();
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
@@ -298,11 +391,11 @@ export default function Dashboard() {
   }, []);
 
   // --- WORKERS & STORAGE LOGIC ---
-  const allocateMemory = async (target = targetMB, cpu = cpuLoad, modeOverride = null) => {
-    // modeOverride lets the CPU benchmark force STANDARD mode — otherwise a
-    // leftover HASH selection would pin every stage to cpu=100 + hash stress,
-    // making scores incomparable.
+  const allocateMemory = async (target = targetMB, cpu = cpuLoad, modeOverride = null, overrideRamMode = null) => {
+    // modeOverride / overrideRamMode let the CPU benchmark force STANDARD + LINEAR —
+    // otherwise a leftover HASH or CHAOS/WASM selection would skew stage scores.
     const mode = modeOverride || cpuMode;
+    const effectiveRamMode = overrideRamMode || ramMode;
     const effectiveCpu = mode === 'HASH' ? 100 : cpu; 
     const workerTotal = Math.max(0, target);
     
@@ -317,23 +410,60 @@ export default function Dashboard() {
         setWorkers([]);
     }
     
+    setError(null);
+    setRamHolding(false);
+    completedWorkersRef.current = 0;
+    benchOpsRef.current = 0;
+    benchErrorRef.current = null;
     setIsAllocating(true);
     setAllocatedMB(0);
+    allocatedMBRef.current = 0;
     const numWorkers = Math.ceil(workerTotal / WORKER_CAP);
+    if (numWorkers === 0) {
+      setIsAllocating(false);
+      return;
+    }
     const newWorkers = [];
     const workerUrl = new URL('../workers/ramWorker.js', import.meta.url);
     
-    addLog(`Spawning ${numWorkers} workers for ${target}MB...`);
+    addLog(`Spawning ${numWorkers} workers for ${target}MB (${effectiveRamMode})...`);
     for(let i=0; i<numWorkers; i++) {
         const w = new Worker(workerUrl, { type: 'module' });
         const amount = Math.min(WORKER_CAP, workerTotal - (i*WORKER_CAP));
         
         w.onmessage = (e) => {
-            if(e.data.type === 'PROGRESS') setAllocatedMB(p => p + e.data.addedMB);
-            if(e.data.type === 'ERROR') addLog(`Worker #${i} Error`, 'error');
-            else if (e.data.type === 'HASH') {
-                if (Math.random() > 0.8) addLog(`⛏️ Hashed: ${e.data.hash}`, 'success');
+            const data = e.data || {};
+            if (data.type === 'PROGRESS') {
+              setAllocatedMB(p => p + data.addedMB);
+              allocatedMBRef.current += data.addedMB;
+              if (typeof data.ops === 'number') benchOpsRef.current += data.ops;
+            } else if (data.type === 'HASH') {
+              if (typeof data.ops === 'number') benchOpsRef.current += data.ops;
+              if (Math.random() > 0.8) addLog(`⛏️ Hashed: ${data.hash}`, 'success');
+            } else if (data.type === 'HASH_LOOP_ENTER') {
+              completedWorkersRef.current += 1;
+              if (completedWorkersRef.current >= numWorkers) {
+                addLog('Allocation complete — holding RAM & hashing CPU', 'success');
+              }
+            } else if (data.type === 'DONE') {
+              completedWorkersRef.current += 1;
+              if (completedWorkersRef.current >= numWorkers && mode === 'STANDARD') {
+                setRamHolding(true);
+                addLog('Allocation complete — holding RAM (CPU idle)', 'success');
+              }
+            } else if (data.type === 'ERROR') {
+              const errMsg = `Worker #${data.id ?? i} Error: ${data.error || 'Allocation failed'}`;
+              addLog(errMsg, 'error');
+              setError(errMsg);
+              if (!benchErrorRef.current) benchErrorRef.current = errMsg;
             }
+        };
+
+        w.onerror = (err) => {
+          const errMsg = `Worker #${i} crashed: ${err?.message || 'Unexpected error'}`;
+          addLog(errMsg, 'error');
+          setError(errMsg);
+          if (!benchErrorRef.current) benchErrorRef.current = errMsg;
         };
         
         w.postMessage({ 
@@ -342,7 +472,7 @@ export default function Dashboard() {
           id: i, 
           cpuLoad: effectiveCpu, 
           mode: mode, 
-          ramMode: ramMode
+          ramMode: effectiveRamMode
         });
         
         newWorkers.push(w);
@@ -351,13 +481,91 @@ export default function Dashboard() {
     setWorkers(newWorkers);
   };
 
-  const stopRAM = () => {
+  const stopRAM = (clearErr = true) => {
       if (!isAllocating && workersRef.current.length === 0) return;
       workersRef.current.forEach(w => w.terminate());
       workersRef.current = [];
       setWorkers([]);
       setIsAllocating(false);
+      setRamHolding(false);
       setAllocatedMB(0);
+      allocatedMBRef.current = 0;
+      if (clearErr) setError(null);
+  };
+
+  // --- SHAREDARRAYBUFFER ATOMICS CONTENTION ---
+  const stopAtomics = () => {
+    const r = atomicsRefs.current;
+    if (!atomicsActive && r.workers.length === 0 && !r.timer) return;
+    if (r.timer) {
+      clearInterval(r.timer);
+      r.timer = null;
+    }
+    r.workers.forEach((w) => {
+      try { w.postMessage({ type: 'STOP' }); } catch { /* already closed */ }
+      w.terminate();
+    });
+    r.workers = [];
+    r.ops = 0;
+    setAtomicsActive(false);
+    setAtomicsMops(0);
+    addLog('Atomics contention stopped.');
+  };
+
+  const startAtomics = () => {
+    if (atomicsActive) return;
+    if (!telemetry.hasSharedArrayBuffer) {
+      const msg = 'SharedArrayBuffer is unavailable (requires crossOriginIsolated context).';
+      addLog(msg, 'error');
+      setError(msg);
+      return;
+    }
+
+    const r = atomicsRefs.current;
+    if (r.timer) { clearInterval(r.timer); r.timer = null; }
+    r.workers.forEach((w) => w.terminate());
+    r.workers = [];
+
+    setError(null);
+    const sab = new SharedArrayBuffer(1024);
+    const threadCount = Math.min(navigator.hardwareConcurrency || 4, 16);
+    const workerUrl = new URL('../workers/atomicsWorker.js', import.meta.url);
+
+    r.ops = 0;
+    r.lastTime = performance.now();
+    setAtomicsActive(true);
+    setAtomicsMops(0);
+
+    const spawned = [];
+    for (let i = 0; i < threadCount; i++) {
+      const w = new Worker(workerUrl, { type: 'module' });
+      w.onmessage = (e) => {
+        const data = e.data || {};
+        if (data.type === 'STATS' && typeof data.opsDelta === 'number') {
+          r.ops += data.opsDelta;
+        } else if (data.type === 'ERROR') {
+          addLog(`Atomics worker #${i}: ${data.error || 'error'}`, 'error');
+        }
+      };
+      w.onerror = (err) => {
+        addLog(`Atomics worker #${i} crashed: ${err?.message || 'Unexpected error'}`, 'error');
+      };
+      w.postMessage({ type: 'START', sab, threads: threadCount, workerId: i });
+      spawned.push(w);
+    }
+    r.workers = spawned;
+
+    r.timer = setInterval(() => {
+      const now = performance.now();
+      const dt = (now - r.lastTime) / 1000;
+      const ops = r.ops;
+      r.ops = 0;
+      r.lastTime = now;
+      const mops = dt > 0 ? (ops / dt) / 1e6 : 0;
+      setAtomicsMops(mops);
+    }, 500);
+
+    addLog(`Atomics contention started — ${threadCount} threads on 1024 B SharedArrayBuffer`, 'success');
   };
 
   // --- OPFS STORAGE LOGIC ---
@@ -368,19 +576,26 @@ export default function Dashboard() {
       const worker = new Worker(workerUrl, { type: 'module' });
       
       worker.onmessage = (e) => {
-          if (e.data.type === 'WRITTEN') {
-              setStorageUsed(prev => prev + e.data.mb);
-              setStorageCount(prev => prev + 1); 
-          } else if (e.data.type === 'ERROR') {
-              addLog(`Storage Full/Error: ${e.data.msg}`, 'warning');
-              stopStorage();
-          } else if (e.data.type === 'CLEARED') {
+          const data = e.data || {};
+          if (data.type === 'PROGRESS') {
+              setStorageUsed(data.totalMB ?? 0);
+              setStorageCount(data.chunks ?? 0);
+          } else if (data.type === 'STATUS') {
+              setStorageUsed(data.sizeMB ?? 0);
+              setStorageCount(data.chunks ?? 0);
+          } else if (data.type === 'ERROR') {
+              addLog(`Storage Full/Error: ${data.msg}`, 'warning');
+              setIsFillingStorage(false);
+              isFillingStorageRef.current = false;
+              addLog("Storage Writer Stopped.");
+          } else if (data.type === 'CLEANED' || data.type === 'CLEARED') {
               setStorageUsed(0);
               setStorageCount(0);
               addLog("Storage Cleaned (OPFS).", 'success');
+          } else if (data.type === 'STOPPED') {
+              setIsFillingStorage(false);
+              isFillingStorageRef.current = false;
           }
-          // 'STOPPED' needs no handling: the worker stays alive (idle) so it
-          // can be reused for the next fill/clear without re-spawning.
       };
       
       storageWorkerRef.current = worker;
@@ -389,6 +604,7 @@ export default function Dashboard() {
 
   const fillStorage = () => {
       if (isFillingStorage) return;
+      setError(null);
       // A new sync access handle starts writing at offset 0, so the session
       // counter must restart — otherwise it inflates past real disk usage.
       setStorageUsed(0);
@@ -420,15 +636,17 @@ export default function Dashboard() {
   const clearStorage = () => {
       setIsFillingStorage(false);
       isFillingStorageRef.current = false;
-      // CLEAR closes any open handle inside the worker before deleting the
-      // file, so no separate STOP is needed (avoids a stop/clear race).
+      // CLEAN closes any open handle inside the worker before deleting the
+      // file, so no separate STOP is needed (avoids a stop/clean race).
       const worker = initStorageWorker(); 
-      worker.postMessage('CLEAR');
+      worker.postMessage('CLEAN');
   };
 
   // --- NETWORK STORM LOGIC ---
   const runNetworkStress = () => {
     if (netActive) return;
+    setError(null);
+    netTotalRef.current = 0;
     setNetActive(true);
     setNetStats({ speed: 0, total: 0 });
     addLog("NETWORK STORM: Initializing Background Worker...");
@@ -441,7 +659,12 @@ export default function Dashboard() {
     let lastTime = performance.now();
 
     worker.onmessage = (e) => {
-        const currentBytes = e.data.total;
+        const data = e.data || {};
+        if (data.type === 'WARN') {
+            addLog(`Network: ${data.message}`, 'warning');
+            return;
+        }
+        const currentBytes = data.total ?? 0;
         netTotalRef.current = currentBytes;
         const now = performance.now();
         const timeDiff = (now - lastTime) / 1000; 
@@ -479,6 +702,7 @@ export default function Dashboard() {
   // --- WEBRTC MESH STORM ---
   const startRtcStorm = async () => {
     if (rtcActive) return;
+    setError(null);
     const refs = rtcRefs.current;
     // Run token: stopRtcStorm bumps it so every await below can detect a
     // stop that fired mid-setup and abort instead of leaking peers/camera.
@@ -513,7 +737,8 @@ export default function Dashboard() {
       return;
     }
 
-    const payload = new Uint8Array(rtcPayload * 1024);
+    const chunkBytes = Math.min(rtcPayload * 1024, 65536);
+    const payload = new Uint8Array(chunkBytes);
     // fill with pseudo-random to defeat compression inside DTLS
     for (let i = 0; i < payload.length; i++) payload[i] = (Math.random() * 256) | 0;
     let openCount = 0;
@@ -526,6 +751,15 @@ export default function Dashboard() {
 
       pc1.onicecandidate = (e) => e.candidate && pc2.addIceCandidate(e.candidate).catch(() => {});
       pc2.onicecandidate = (e) => e.candidate && pc1.addIceCandidate(e.candidate).catch(() => {});
+
+      pc2.ondatachannel = (ev) => {
+        const rxChannel = ev.channel;
+        rxChannel.binaryType = 'arraybuffer';
+        rxChannel.onmessage = (msgEv) => {
+          const size = msgEv.data?.byteLength ?? msgEv.data?.size ?? (typeof msgEv.data === 'string' ? msgEv.data.length : 0);
+          refs.recvBytes += size;
+        };
+      };
 
       // media sender
       if (refs.stream) {
@@ -543,14 +777,20 @@ export default function Dashboard() {
         openCount += 2;
         channelCount += 1;
         setRtcStats((s) => ({ ...s, open: openCount, channels: channelCount }));
+        const maxMsgSize = pc1.sctp?.maxMessageSize || 65536;
+        const safeBytes = Math.max(1, Math.min(chunkBytes, maxMsgSize));
+        const pairPayload = safeBytes === payload.byteLength ? payload : payload.subarray(0, safeBytes);
         const iv = setInterval(() => {
           if (dc.readyState === 'open') {
-            try { dc.send(payload); refs.sentBytes += payload.byteLength; } catch { /* channel closed — drop */ }
+            if (dc.bufferedAmount > pairPayload.byteLength * 8) return;
+            try {
+              dc.send(pairPayload);
+              refs.sentBytes += pairPayload.byteLength;
+            } catch { /* channel closed — drop */ }
           }
         }, rtcInterval);
         refs.intervals.push(iv);
       };
-      dc.onmessage = (ev) => { refs.recvBytes += ev.data.byteLength; };
 
       try {
         const offer = await pc1.createOffer();
@@ -577,7 +817,7 @@ export default function Dashboard() {
       const mbps = dt > 0 ? (dBytes * 8) / (1024 * 1024) / dt : 0;
       lastSent = refs.sentBytes;
       lastTime = now;
-      const totalMB = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
+      const totalMB = refs.sentBytes / (1024 * 1024);
       setRtcStats((s) => ({ ...s, mbps, totalMB }));
     }, 500);
 
@@ -594,7 +834,7 @@ export default function Dashboard() {
     refs.pairs.forEach((pc) => { try { pc.close(); } catch { /* already closed */ } });
     refs.pairs = [];
     if (refs.stream) { refs.stream.getTracks().forEach((t) => t.stop()); refs.stream = null; }
-    const burned = (refs.sentBytes + refs.recvBytes) / (1024 * 1024);
+    const burned = refs.sentBytes / (1024 * 1024);
     setRtcActive(false);
     setRtcStats((s) => ({ ...s, open: 0, channels: 0, mbps: 0 }));
     addLog(`WebRTC storm stopped. Burned: ${burned.toFixed(1)} MB`);
@@ -603,6 +843,7 @@ export default function Dashboard() {
   // --- INDEXEDDB FLOOD ---
   const startIdbFlood = async () => {
     if (idbActive) return;
+    setError(null);
     // Cancel any pending stop-wipe: it would delete the DB we're about to open
     if (idbClearTimerRef.current) {
       clearTimeout(idbClearTimerRef.current);
@@ -621,20 +862,25 @@ export default function Dashboard() {
     r.lastTime = performance.now();
 
     // Open / upgrade database with N parallel object stores
-    const req = indexedDB.open('rampage_idb', Date.now());
-    await new Promise((resolve, reject) => {
-      req.onupgradeneeded = () => {
-        const db = req.result;
-        for (let i = 0; i < idbStores; i++) {
-          if (!db.objectStoreNames.contains(`s${i}`)) db.createObjectStore(`s${i}`, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-      req.onblocked = () => reject(new Error('open blocked by another connection'));
-    }).then((db) => { r.db = db; }).catch((e) => {
-      addLog(`IndexedDB: open failed: ${e.message}`, 'error');
-    });
+    try {
+      const req = indexedDB.open('rampage_idb', Date.now());
+      await new Promise((resolve, reject) => {
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          for (let i = 0; i < idbStores; i++) {
+            if (!db.objectStoreNames.contains(`s${i}`)) db.createObjectStore(`s${i}`, { keyPath: 'id' });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+        req.onblocked = () => reject(new Error('open blocked by another connection'));
+      }).then((db) => { r.db = db; });
+    } catch (e) {
+      const msg = `IndexedDB: open failed: ${e?.message || e}`;
+      addLog(msg, 'error');
+      setError(msg);
+      return;
+    }
 
     if (!r.db) return;
     // A stop may have fired while we awaited the open — bail out instead of
@@ -688,9 +934,21 @@ export default function Dashboard() {
           const tx = r.db.transaction(storeName, 'readwrite');
           const store = tx.objectStore(storeName);
           await new Promise((resolve, reject) => {
+            let settled = false;
+            const fail = (err) => {
+              if (settled) return;
+              settled = true;
+              reject(err || new Error('Transaction aborted'));
+            };
+            tx.oncomplete = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            tx.onabort = () => fail(tx.error);
+            tx.onerror = () => fail(tx.error);
             const q = store.put({ id: key, blob, ts: Date.now() });
-            q.onsuccess = () => resolve();
-            q.onerror = () => reject(q.error);
+            q.onerror = () => fail(q.error);
           });
           r.bytes += chunkBytes;
           r.objects += 1;
@@ -704,7 +962,7 @@ export default function Dashboard() {
             setIdbActive(false);
             return;
           } else {
-            addLog(`IndexedDB: put error: ${e.message}`, 'error');
+            addLog(`IndexedDB: put error: ${e?.message || e}`, 'error');
             await new Promise((res) => setTimeout(res, 200));
           }
         }
@@ -732,6 +990,7 @@ export default function Dashboard() {
     r.cancel = true;
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
     setIdbActive(false);
+    setIdbStats({ storedMB: 0, objects: 0, speed: 0, openStores: 0 });
     addLog(`IndexedDB flood stopping…`);
     // small delay to let pending tx finish, then wipe
     if (idbClearTimerRef.current) clearTimeout(idbClearTimerRef.current);
@@ -754,12 +1013,14 @@ export default function Dashboard() {
     } catch (e) {
       setSwRegState(`register failed: ${e.message}`);
       addLog(`SW: register failed: ${e.message}`, 'error');
+      setError(`SW register failed: ${e.message}`);
       return null;
     }
   };
 
   const startSw = async () => {
     if (swActive) return;
+    setError(null);
     const r = swRefs.current;
     // Run token: stopSw bumps it so a stop fired during the (slow) SW
     // registration await aborts this start instead of being overridden.
@@ -772,6 +1033,7 @@ export default function Dashboard() {
     r.bytes = 0;
     r.lastTime = performance.now();
     r.lastCount = 0;
+    r.lastWarnAt = 0;
     setSwActive(true);
     setSwStats({ count: 0, rps: 0, cpuMs: 0, bytesMB: 0 });
     addLog(`SW hammer started — mode=${swMode} work=${swWork} size=${swSize} rate=${swRate}ms`, 'success');
@@ -797,6 +1059,15 @@ export default function Dashboard() {
       const url = `/sw-hammer/r?mode=${swMode}&work=${swWork}&sz=${swSize}&_=${Date.now()}`;
       try {
         const res = await fetch(url);
+        if (!res.headers.get('X-Rampage-Mode')) {
+          const now = Date.now();
+          if (now - r.lastWarnAt >= 3000) {
+            r.lastWarnAt = now;
+            addLog('SW: response lacked X-Rampage-Mode (SPA fallback / SW not intercepting)', 'warning');
+          }
+          await res.arrayBuffer();
+          return;
+        }
         r.bytes += Number(res.headers.get('Content-Length') || swSize);
         const cpu = parseFloat(res.headers.get('X-Rampage-Cpu-Ms') || '0');
         if (!isNaN(cpu)) r.cpuMsAcc += cpu;
@@ -928,16 +1199,22 @@ export default function Dashboard() {
 
   const startAudio = async () => {
     if (audioActive) return;
-    if (typeof OfflineAudioContext === 'undefined' && typeof webkitOfflineAudioContext === 'undefined') {
-      addLog(`Audio: OfflineAudioContext unsupported in this browser`, 'error');
+    const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!OfflineCtx) {
+      const msg = 'Audio: OfflineAudioContext unsupported in this browser';
+      addLog(msg, 'error');
+      setError(msg);
       return;
     }
+    setError(null);
     const r = audioRefs.current;
+    const myRunId = (r.runId = (r.runId || 0) + 1);
     r.cancel = false;
     r.renders = 0;
     r.samples = 0;
     r.totalSamples = 0;
     r.active = 0;
+    r.lastWarnAt = 0;
     r.start = performance.now();
     setAudioActive(true);
     setAudioStats({ running: 0, renders: 0, samples: 0, seconds: 0 });
@@ -956,22 +1233,30 @@ export default function Dashboard() {
     }, 250);
 
     const oneVoice = async () => {
-      while (!r.cancel) {
+      while (!r.cancel && r.runId === myRunId) {
         const sr = 44100;
-        const ctx = new OfflineAudioContext(2, Math.ceil(sr * audioLength), sr);
+        const ctx = new OfflineCtx(2, Math.ceil(sr * audioLength), sr);
         r.active += 1;
+        let errored = false;
         try {
           buildVoiceGraph(ctx, audioMode, audioLength);
           const buf = await ctx.startRendering();
+          if (r.cancel || r.runId !== myRunId) break;
           r.renders += 1;
           r.totalSamples += buf.length;
         } catch (e) {
-          addLog(`Audio: render error: ${e.message}`, 'warning');
+          errored = true;
+          const now = Date.now();
+          if (now - r.lastWarnAt >= 3000) {
+            r.lastWarnAt = now;
+            addLog(`Audio: render error: ${e.message}`, 'warning');
+          }
         } finally {
-          r.active -= 1;
+          r.active = Math.max(0, r.active - 1);
         }
-        // yield
-        await new Promise((res) => setTimeout(res, 0));
+        if (r.cancel || r.runId !== myRunId) break;
+        // yield (back off 500ms after errors to avoid tight error loops)
+        await new Promise((res) => setTimeout(res, errored ? 500 : 0));
       }
     };
 
@@ -983,6 +1268,7 @@ export default function Dashboard() {
 
   const stopAudio = () => {
     const r = audioRefs.current;
+    r.runId = (r.runId || 0) + 1;
     if (!audioActive && !r.statsTimer) return;
     r.cancel = true;
     if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
@@ -991,105 +1277,95 @@ export default function Dashboard() {
   };
 
   // --- CANVAS 2D PIXEL STORM ---
+  const stopC2d = useCallback((preserveError = false) => {
+    const r = c2dRefs.current;
+    if (!r.worker && !c2dActive) return;
+    if (r.worker) {
+      try { r.worker.postMessage({ type: 'STOP' }); } catch { /* already closed */ }
+      r.worker.terminate();
+      r.worker = null;
+    }
+    setC2dActive(false);
+    if (!preserveError) setError(null);
+    addLog(`Pixel 2D storm stopped. Frames: ${r.frames.toLocaleString()}.`);
+  }, [addLog, c2dActive]);
+
   const startC2d = () => {
     if (c2dActive) return;
+    setError(null);
     const r = c2dRefs.current;
-    r.cancel = false;
-    r.frames = 0;
-    r.lastTime = performance.now();
-    r.lastFrames = 0;
+    if (r.worker) {
+      try { r.worker.postMessage({ type: 'STOP' }); } catch { /* ignore */ }
+      r.worker.terminate();
+      r.worker = null;
+    }
 
-    const h = (c2dRes * 9 / 16) | 0;
     const w = c2dRes;
+    const h = (c2dRes * 9 / 16) | 0;
     const pxPerFrame = w * h * c2dPasses;
+    r.frames = 0;
     r.pxPerFrame = pxPerFrame;
 
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) {
-      addLog(`Pixel 2D: 2D context unavailable`, 'error');
-      return;
-    }
+    const worker = new Worker(new URL('../workers/canvas2dWorker.js', import.meta.url), { type: 'module' });
+    r.worker = worker;
 
     setC2dActive(true);
     setC2dStats({ frames: 0, pxPerFrame, mpps: 0 });
     addLog(`Pixel 2D storm: ${w}×${h}, ${c2dPasses} passes, ${c2dMode} mode`, 'success');
 
-    // initial fill so getImageData has content
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, w, h);
-
-    if (r.statsTimer) clearInterval(r.statsTimer);
-    r.statsTimer = setInterval(() => {
-      const now = performance.now();
-      const dt = (now - r.lastTime) / 1000;
-      const dFrames = r.frames - r.lastFrames;
-      const fps = dt > 0 ? dFrames / dt : 0;
-      const mpps = (fps * r.pxPerFrame) / 1e6;
-      r.lastTime = now;
-      r.lastFrames = r.frames;
-      setC2dStats((s) => ({ ...s, frames: r.frames, mpps }));
-    }, 500);
-
-    const doFrame = () => {
-      if (r.cancel) return;
-      for (let pass = 0; pass < c2dPasses; pass++) {
-        let img;
-        try {
-          img = ctx.getImageData(0, 0, w, h);
-        } catch (e) {
-          addLog(`Pixel 2D: getImageData failed: ${e.message}`, 'error');
-          stopC2d();
-          return;
+    worker.onmessage = (e) => {
+      const data = e.data || {};
+      if (data.type === 'STATS') {
+        r.frames = data.frames ?? r.frames;
+        setC2dStats({
+          frames: r.frames,
+          pxPerFrame: r.pxPerFrame,
+          mpps: (data.pixelsPerSec ?? 0) / 1e6,
+        });
+      } else if (data.type === 'ERROR') {
+        const msg = `Pixel 2D: ${data.error || 'OffscreenCanvas error'}`;
+        addLog(msg, 'error');
+        setError(msg);
+        if (r.worker) {
+          try { r.worker.postMessage({ type: 'STOP' }); } catch { /* ignore */ }
+          r.worker.terminate();
+          r.worker = null;
         }
-        const d = img.data;
-        if (c2dMode === 'xor') {
-          const seed = (Math.random() * 255) | 0;
-          for (let i = 0; i < d.length; i += 4) {
-            d[i] ^= seed; d[i+1] ^= (seed << 1) & 0xff; d[i+2] ^= (seed << 2) & 0xff;
-          }
-        } else if (c2dMode === 'noise') {
-          for (let i = 0; i < d.length; i += 4) {
-            d[i] = (Math.random()*256)|0; d[i+1] = (Math.random()*256)|0; d[i+2] = (Math.random()*256)|0;
-          }
-        } else {
-          // blend with moving gradient, read-modify-write — also stresses sampler path
-          const t = (r.frames + pass) * 0.05;
-          for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-              const i = (y * w + x) * 4;
-              const g = (Math.sin(x*0.01 + t) * 0.5 + 0.5) * 255;
-              d[i] = (d[i] + g) >> 1;
-              d[i+1] = (d[i+1] + (Math.cos(y*0.01 + t) * 0.5 + 0.5) * 255) >> 1;
-              d[i+2] = (d[i+2] + g * 0.6) >> 1;
-            }
-          }
-        }
-        ctx.putImageData(img, 0, 0);
+        setC2dActive(false);
       }
-      r.frames += 1;
-      r.raf = requestAnimationFrame(doFrame);
     };
-    r.raf = requestAnimationFrame(doFrame);
+
+    worker.onerror = (err) => {
+      const msg = `Pixel 2D worker error: ${err?.message || 'OffscreenCanvas unsupported'}`;
+      addLog(msg, 'error');
+      setError(msg);
+      if (r.worker) {
+        r.worker.terminate();
+        r.worker = null;
+      }
+      setC2dActive(false);
+    };
+
+    worker.postMessage({ type: 'START', width: w, height: h, passes: c2dPasses, mode: c2dMode });
   };
 
-  const stopC2d = () => {
+  useEffect(() => {
     const r = c2dRefs.current;
-    if (!c2dActive && !r.raf && !r.statsTimer) return;
-    r.cancel = true;
-    if (r.raf) { cancelAnimationFrame(r.raf); r.raf = null; }
-    if (r.statsTimer) { clearInterval(r.statsTimer); r.statsTimer = null; }
-    setC2dActive(false);
-    addLog(`Pixel 2D storm stopped. Frames: ${r.frames.toLocaleString()}.`);
-  };
+    if (!c2dActive || !r.worker) return;
+    const w = c2dRes;
+    const h = (c2dRes * 9 / 16) | 0;
+    r.pxPerFrame = w * h * c2dPasses;
+    setC2dStats((s) => ({ ...s, pxPerFrame: r.pxPerFrame }));
+    r.worker.postMessage({ type: 'UPDATE', width: w, height: h, passes: c2dPasses, mode: c2dMode });
+  }, [c2dActive, c2dRes, c2dPasses, c2dMode]);
 
   // Plain function (not useCallback): it is only ever called from event
   // handlers, and every stop* helper reads live values through refs, so a
   // memoized identity would add nothing but stale-closure risk.
   const clearAll = () => {
       stopRAM();
+      stopAtomics();
+      webGpu.stop();
       clearStorage();
       stopNetworkStress();
       stopRtcStorm();
@@ -1239,8 +1515,21 @@ export default function Dashboard() {
       }
   }, [gpuBenchMode]);
 
-  const handleGpuCrash = useCallback(() => {
-      if (gpuBenchMode === 'NONE') return;
+  const handleGpuCrash = useCallback((msg) => {
+      if (gpuBenchMode === 'NONE') {
+          if (typeof msg === 'string' && msg) {
+              addLog(`GPU Error: ${msg}`, 'error');
+              setError(msg);
+          } else {
+              addLog('GPU: WebGL context lost', 'warning');
+          }
+          setGpuActive(false);
+          setShowGpuPopup(false);
+          return;
+      }
+      if (typeof msg === 'string' && msg) {
+          addLog(`GPU Benchmark stage error: ${msg}`, 'error');
+      }
       
       if (gpuBenchInterval.current) clearInterval(gpuBenchInterval.current);
 
@@ -1259,7 +1548,7 @@ export default function Dashboard() {
            setGpuBenchStage(nextStage);
            setupGpuStage(gpuBenchMode, nextStage, newResults);
       }, 4000);
-  }, [gpuBenchMode, gpuBenchStage, gpuBenchResults, setupGpuStage]);
+  }, [gpuBenchMode, gpuBenchStage, gpuBenchResults, setupGpuStage, addLog]);
 
   // --- CPU BENCHMARK ---
   const startCpuBenchmark = () => {
@@ -1270,14 +1559,19 @@ export default function Dashboard() {
       cpuBenchScoreRef.current = 0;
       
       let stage = 0;
+      let accumulatedScore = 0;
       const stages = [
           { ram: 1024, cpu: 20, time: 5 }, { ram: 2048, cpu: 50, time: 5 }, { ram: 4096, cpu: 80, time: 8 }, 
           { ram: 8192, cpu: 100, time: 10 }, { ram: 12288, cpu: 100, time: 10 } 
       ];
+
+      const computeStageScore = () => (
+          Math.floor(allocatedMBRef.current * 0.5) + Math.floor(benchOpsRef.current / 100000)
+      );
       
       const runStage = () => {
           if (stage >= stages.length) {
-              const finalScore = cpuBenchScoreRef.current + 5000;
+              const finalScore = accumulatedScore;
               const currentHigh = Number(localStorage.getItem('ramEater_cpuHighScore') || 0);
               if (finalScore > currentHigh) {
                   setCpuHighScore(finalScore);
@@ -1290,16 +1584,37 @@ export default function Dashboard() {
           const current = stages[stage];
           setTargetMB(current.ram);
           setCpuLoad(current.cpu);
-          allocateMemory(current.ram, current.cpu, 'STANDARD');
+          allocateMemory(current.ram, current.cpu, 'STANDARD', 'LINEAR');
           
           let timeLeft = current.time;
           benchmarkInterval.current = setInterval(() => {
+              if (benchErrorRef.current) {
+                  clearInterval(benchmarkInterval.current);
+                  benchmarkInterval.current = null;
+                  const partialScore = accumulatedScore + computeStageScore();
+                  cpuBenchScoreRef.current = partialScore;
+                  setCpuBenchScore(partialScore);
+                  const currentHigh = Number(localStorage.getItem('ramEater_cpuHighScore') || 0);
+                  if (partialScore > currentHigh) {
+                      setCpuHighScore(partialScore);
+                      localStorage.setItem('ramEater_cpuHighScore', partialScore);
+                  }
+                  const failReason = benchErrorRef.current;
+                  addLog(`CPU Benchmark Failed at stage ${stage + 1} (${failReason}). Score recorded: ${partialScore}`, 'error');
+                  stopCpuBenchmark(true);
+                  setError(failReason);
+                  return;
+              }
+
               timeLeft--;
-              const pts = Math.floor((current.ram / 100) + current.cpu);
-              cpuBenchScoreRef.current += pts;
-              setCpuBenchScore(cpuBenchScoreRef.current);
+              const stagePts = computeStageScore();
+              const liveScore = accumulatedScore + stagePts;
+              cpuBenchScoreRef.current = liveScore;
+              setCpuBenchScore(liveScore);
               if (timeLeft <= 0) {
                   clearInterval(benchmarkInterval.current);
+                  benchmarkInterval.current = null;
+                  accumulatedScore += stagePts;
                   stage++;
                   runStage();
               }
@@ -1308,10 +1623,13 @@ export default function Dashboard() {
       runStage();
   };
 
-  const stopCpuBenchmark = () => {
-      if(benchmarkInterval.current) clearInterval(benchmarkInterval.current);
+  const stopCpuBenchmark = (preserveError = false) => {
+      if (benchmarkInterval.current) {
+          clearInterval(benchmarkInterval.current);
+          benchmarkInterval.current = null;
+      }
       setIsBenchmarking(false);
-      stopRAM();
+      stopRAM(preserveError !== true);
       setTargetMB(4096);
       setCpuLoad(0);
   };
@@ -1385,7 +1703,9 @@ export default function Dashboard() {
       const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
       
       if(!gl) {
-          addLog("VRAM Error: WebGL not supported", "error");
+          const msg = "VRAM Error: WebGL not supported";
+          addLog(msg, "error");
+          setError(msg);
           setVramActive(false);
           return;
       }
@@ -1441,13 +1761,14 @@ export default function Dashboard() {
       addLog(`VRAM Burner Stopped. Freed memory.`, "info");
   };
 
-  const anyActive = isAllocating || isFillingStorage || gpuActive || netActive ||
+  const anyActive = isAllocating || atomicsActive || isFillingStorage || gpuActive || webGpu.running || netActive ||
                     vramActive || isBenchmarking || gpuBenchMode !== 'NONE' || rtcActive || idbActive || swActive || audioActive || c2dActive;
   const status = error ? 'error' : anyActive ? 'active' : 'idle';
   const activeViews = [
-    isAllocating && 'RAM',
+    (isAllocating || atomicsActive) && 'RAM',
     isFillingStorage && 'STORAGE',
     (gpuActive || vramActive) && 'GPU',
+    webGpu.running && 'WEBGPU',
     netActive && 'NETWORK',
     rtcActive && 'WEBRTC',
     idbActive && 'IDB',
@@ -1457,7 +1778,44 @@ export default function Dashboard() {
     (isBenchmarking || gpuBenchMode !== 'NONE') && 'BENCH',
   ].filter(Boolean);
 
+  const safetyRemainingSec = anyActive && safetyDurationSec > 0
+    ? (safetyTimer?.duration === safetyDurationSec ? safetyTimer.remaining : safetyDurationSec)
+    : null;
+
+  useEffect(() => {
+    clearAllRef.current = clearAll;
+  });
+
+  useEffect(() => {
+    if (!anyActive || safetyDurationSec <= 0) {
+      const resetT = setTimeout(() => setSafetyTimer(null), 0);
+      return () => clearTimeout(resetT);
+    }
+
+    const duration = safetyDurationSec;
+    let remaining = duration;
+    const initT = setTimeout(() => setSafetyTimer({ duration, remaining }), 0);
+
+    const iv = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(iv);
+        setSafetyTimer(null);
+        clearAllRef.current?.();
+        addLog('Safety auto-stop timer triggered — all vectors halted', 'warning');
+        return;
+      }
+      setSafetyTimer({ duration, remaining });
+    }, 1000);
+
+    return () => {
+      clearTimeout(initT);
+      clearInterval(iv);
+    };
+  }, [anyActive, safetyDurationSec, addLog]);
+
   const toggleGpu = () => {
+    setError(null);
     setGpuActive(!gpuActive);
   };
 
@@ -1468,14 +1826,23 @@ export default function Dashboard() {
   // Mobile FAB: per-view primary action (start/stop) for the current view
   const fabBusy = isBenchmarking || gpuBenchMode !== 'NONE';
   const fabByView = {
-    RAM: {
-      active: isAllocating,
-      busy: fabBusy,
-      start: () => allocateMemory(),
-      stop: stopRAM,
-      startLabel: cpuMode === 'HASH' ? 'Hash' : 'Start load',
-      stopLabel: 'Stop RAM',
-    },
+    RAM: cpuMode === 'ATOMICS'
+      ? {
+          active: atomicsActive,
+          busy: fabBusy || !telemetry.hasSharedArrayBuffer,
+          start: startAtomics,
+          stop: stopAtomics,
+          startLabel: 'Start atomics',
+          stopLabel: 'Stop atomics',
+        }
+      : {
+          active: isAllocating,
+          busy: fabBusy,
+          start: () => allocateMemory(),
+          stop: stopRAM,
+          startLabel: cpuMode === 'HASH' ? 'Hash' : 'Start load',
+          stopLabel: 'Stop RAM',
+        },
     STORAGE: {
       active: isFillingStorage,
       busy: fabBusy,
@@ -1491,6 +1858,14 @@ export default function Dashboard() {
       stop: toggleGpu,
       startLabel: 'Shader test',
       stopLabel: 'Stop shader',
+    },
+    WEBGPU: {
+      active: webGpu.running,
+      busy: fabBusy || !webGpu.supported,
+      start: webGpu.start,
+      stop: webGpu.stop,
+      startLabel: 'Start WebGPU',
+      stopLabel: 'Stop WebGPU',
     },
     NETWORK: {
       active: netActive,
@@ -1556,6 +1931,10 @@ export default function Dashboard() {
         open={mobileNavOpen}
         onClose={() => setMobileNavOpen(false)}
         mobileDisabled={mobileDisabledViews}
+        telemetry={telemetry}
+        safetyDurationSec={safetyDurationSec}
+        setSafetyDurationSec={setSafetyDurationSec}
+        safetyRemainingSec={safetyRemainingSec}
       />
 
       <main className="flex-1 overflow-y-auto p-3">
@@ -1576,6 +1955,7 @@ export default function Dashboard() {
               {view === 'RAM' && 'RAM & CPU'}
               {view === 'STORAGE' && 'Storage'}
               {view === 'GPU' && 'GPU'}
+              {view === 'WEBGPU' && 'WebGPU'}
               {view === 'NETWORK' && 'Network'}
               {view === 'WEBRTC' && 'WebRTC'}
               {view === 'IDB' && 'IndexedDB'}
@@ -1591,7 +1971,25 @@ export default function Dashboard() {
               <span className="uppercase tracking-wide">{status}</span>
             </span>
           </div>
-          <div className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            {safetyRemainingSec != null && (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-mono text-xs font-semibold border ${
+                  safetyRemainingSec <= 10
+                    ? 'bg-red/15 text-red border-red/40'
+                    : 'bg-amber/15 text-amber border-amber/30'
+                }`}
+                title="Auto-stop safety countdown"
+              >
+                <Icons.Timer size={12} />
+                <span>
+                  {safetyRemainingSec >= 60
+                    ? `${Math.floor(safetyRemainingSec / 60)}:${String(safetyRemainingSec % 60).padStart(2, '0')}`
+                    : `${safetyRemainingSec}s`}
+                </span>
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="pb-6">
@@ -1622,6 +2020,7 @@ export default function Dashboard() {
               targetMB={targetMB}
               cpuLoad={cpuLoad}
               isAllocating={isAllocating}
+              ramHolding={ramHolding}
               isBenchmarking={isBenchmarking}
               gpuBenchMode={gpuBenchMode}
               isMobile={isMobile}
@@ -1629,6 +2028,9 @@ export default function Dashboard() {
               minionCount={minionCount}
               minions={minions}
               minionWebRTC={minionWebRTC}
+              atomicsActive={atomicsActive}
+              atomicsMops={atomicsMops}
+              telemetry={telemetry}
               setCpuMode={setCpuMode}
               setRamMode={setRamMode}
               setTargetMB={setTargetMB}
@@ -1640,6 +2042,8 @@ export default function Dashboard() {
               stopRAM={stopRAM}
               spawnMinions={spawnMinions}
               handleKillMinionsConfirm={handleKillMinionsConfirm}
+              startAtomics={startAtomics}
+              stopAtomics={stopAtomics}
             />
           )}
 
@@ -1654,6 +2058,7 @@ export default function Dashboard() {
               fillStorage={fillStorage}
               stopStorage={stopStorage}
               clearStorage={clearStorage}
+              telemetry={telemetry}
             />
           )}
 
@@ -1679,6 +2084,26 @@ export default function Dashboard() {
               handleGpuCrash={handleGpuCrash}
               runVramBurner={runVramBurner}
               stopVramBurner={stopVramBurner}
+            />
+          )}
+
+          {view === 'WEBGPU' && (
+            <WebGpuView
+              supported={webGpu.supported}
+              running={webGpu.running}
+              mode={webGpu.mode}
+              setMode={webGpu.setMode}
+              workgroups={webGpu.workgroups}
+              setWorkgroups={webGpu.setWorkgroups}
+              iters={webGpu.iters}
+              setIters={webGpu.setIters}
+              targetVramMB={webGpu.targetVramMB}
+              setTargetVramMB={webGpu.setTargetVramMB}
+              stats={webGpu.stats}
+              adapterName={webGpu.adapterName}
+              start={webGpu.start}
+              stop={webGpu.stop}
+              busy={isBenchmarking || gpuBenchMode !== 'NONE'}
             />
           )}
 
@@ -1804,7 +2229,7 @@ export default function Dashboard() {
             >
               {fabEntry.active
                 ? <Icons.Square size={22} />
-                : <Icons.Play size={22} style={{ transform: 'translateX(-2px)' }} />}
+                : <Icons.Play size={22} style={{ transform: 'translateX(1px)' }} />}
             </button>
           )}
 
@@ -1822,7 +2247,7 @@ export default function Dashboard() {
                   <Icons.Trophy size={16} className="text-lime" />
                   <span className="font-semibold text-sm">{gpuBenchMode} test</span>
                 </div>
-                <div className="text-xs mono space-y-1 text-fox-2">
+                <div className="text-xs font-mono space-y-1 text-fox-2">
                   <div>scene: {gpuMode}</div>
                   <div>res: {gpuResolution}px</div>
                   <div>overdrive: <span className="text-red">x{gpuOverdrive}</span></div>
@@ -1832,14 +2257,18 @@ export default function Dashboard() {
                   <div>
                     <div className="text-[10px] text-fox-2">avg fps</div>
                     <div className="text-xl font-semibold">
-                      {gpuBenchTimeLeft > 18 ? '…' : (gpuBenchAvgBuffer.slice(4).reduce((a, b) => a + b, 0) / (gpuBenchAvgBuffer.length - 4 || 1)).toFixed(0)}
+                      {gpuBenchTimeLeft > 18
+                        ? '…'
+                        : gpuBenchAvgBuffer.length > 8
+                          ? (gpuBenchAvgBuffer.slice(8).reduce((a, b) => a + b, 0) / (gpuBenchAvgBuffer.length - 8)).toFixed(0)
+                          : gpuBenchCurrentFps}
                     </div>
                   </div>
                   <div className="text-3xl font-bold grad-text">{gpuBenchTimeLeft}</div>
                 </div>
               </div>
             )}
-            <div className="absolute top-4 right-20 z-20 glass text-lime text-xs mono font-semibold px-3 py-1.5 rounded">
+            <div className="absolute top-4 right-20 z-20 glass text-lime text-xs font-mono font-semibold px-3 py-1.5 rounded">
               fps: {gpuBenchTimeLeft > 18 && gpuBenchMode !== 'NONE' ? 'warming…' : gpuBenchCurrentFps}
             </div>
             <button

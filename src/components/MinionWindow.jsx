@@ -95,7 +95,7 @@ export default function MinionWindow() {
     const activeIntervals = [];
     const STORM_INTENSITY = 5;
 
-    const startConnection = () => {
+    const startConnection = async () => {
       const pc1 = new RTCPeerConnection();
       const pc2 = new RTCPeerConnection();
       activeConnections.push(pc1, pc2);
@@ -115,14 +115,16 @@ export default function MinionWindow() {
         activeIntervals.push(interval);
       };
 
-      pc1.createOffer().then(offer => {
-        pc1.setLocalDescription(offer);
-        pc2.setRemoteDescription(offer);
-        return pc2.createAnswer();
-      }).then(answer => {
-        pc2.setLocalDescription(answer);
-        pc1.setRemoteDescription(answer);
-      });
+      try {
+        const offer = await pc1.createOffer();
+        await pc1.setLocalDescription(offer);
+        await pc2.setRemoteDescription(offer);
+        const answer = await pc2.createAnswer();
+        await pc2.setLocalDescription(answer);
+        await pc1.setRemoteDescription(answer);
+      } catch {
+        /* connection closed during SDP handshake */
+      }
     };
 
     for (let i = 0; i < STORM_INTENSITY; i++) {
@@ -143,25 +145,25 @@ export default function MinionWindow() {
   }, [useWebRTC]);
 
   return (
-    <div className="min-h-screen bg-[#0E0E10] text-[#ECECEC] p-4 flex flex-col items-center justify-center font-sans select-none">
-      <h1 className="text-xl font-semibold text-[#F87171] tracking-wide">MINION</h1>
-      <div className="text-xs text-[#8B8B92] mt-2 font-mono">id: {myId.slice(-4)}</div>
+    <div className="min-h-screen bg-ink-1 text-fox p-4 flex flex-col items-center justify-center font-sans select-none">
+      <h1 className="text-xl font-semibold text-red tracking-wide">MINION</h1>
+      <div className="text-xs text-fox-2 mt-2 font-mono">id: {myId.slice(-4)}</div>
 
       <div className="flex flex-col items-center gap-2 mt-4">
-        <div className="text-xs text-[#5A5A62]">eating {targetMB} MB…</div>
+        <div className="text-xs text-fox-3">eating {targetMB} MB…</div>
         {useWebRTC && (
-          <div className="text-[10px] font-semibold text-[#34D399] border border-[#34D399]/40 px-2 py-1 rounded bg-[#34D399]/10 flex items-center gap-2">
+          <div className="text-[10px] font-semibold text-lime border border-lime/40 px-2 py-1 rounded bg-lime/10 flex items-center gap-2">
             <Icons.Wifi size={10} /> WEBRTC STORM
           </div>
         )}
       </div>
 
-      <div className="text-4xl font-mono font-semibold mt-4 text-[#34D399]">
-        {allocatedMB.toFixed(0)} <span className="text-sm text-[#5A5A62]">MB</span>
+      <div className="text-4xl font-mono font-semibold mt-4 text-lime">
+        {allocatedMB.toFixed(0)} <span className="text-sm text-fox-3">MB</span>
       </div>
       <button
         onClick={() => window.close()}
-        className="mt-8 bg-[#F87171]/15 text-[#F87171] border border-[#F87171]/40 hover:bg-[#F87171]/25 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+        className="mt-8 bg-red/15 text-red border border-red/40 hover:bg-red/25 px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors"
       >
         Self destruct
       </button>

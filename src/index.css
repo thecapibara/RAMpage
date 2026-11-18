@@ -42,10 +42,6 @@
   .metric.on { @apply text-lime; }
   .bg-grad-accent { @apply bg-lime; }
   .bg-grad-soft { @apply bg-lime/10; }
-  .shadow-glow { }
-  .shadow-glow-cyan { }
-  .shadow-glow-lime { }
-  .shadow-glow-red { }
   .animate-pulse-soft { @apply animate-pulse; }
 }
 

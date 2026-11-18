@@ -8,30 +8,97 @@ import ErrorBoundary from '../ErrorBoundary';
 import Icons from '../icons';
 import { MAX_LIMIT } from '../../constants';
 
+const PRESETS = [
+  {
+    id: 'smoke',
+    label: 'Smoke',
+    meta: '512 MB · 25% · Standard',
+    targetMB: 512,
+    cpuLoad: 25,
+    cpuMode: 'STANDARD',
+    ramMode: 'LINEAR',
+  },
+  {
+    id: 'thermal',
+    label: 'Thermal',
+    meta: '4096 MB · 80% · Hash',
+    targetMB: 4096,
+    cpuLoad: 80,
+    cpuMode: 'HASH',
+    ramMode: 'LINEAR',
+  },
+  {
+    id: 'oom',
+    label: 'OOM Push',
+    meta: '12288 MB · 100% · Standard',
+    targetMB: 12288,
+    cpuLoad: 100,
+    cpuMode: 'STANDARD',
+    ramMode: 'LINEAR',
+  },
+];
+
 export default function RamCpuView({
   allocatedMB, chartDataRAM, cpuMode, ramMode, targetMB, cpuLoad,
-  isAllocating, isBenchmarking, gpuBenchMode, isMobile,
+  isAllocating, ramHolding, isBenchmarking, gpuBenchMode, isMobile,
   minionSize, minionCount, minions, minionWebRTC,
+  atomicsActive = false, atomicsMops = 0, telemetry,
   setCpuMode, setRamMode, setTargetMB, setCpuLoad,
   setMinionSize, setMinionCount, setMinionWebRTC,
   allocateMemory, stopRAM, spawnMinions, handleKillMinionsConfirm,
+  startAtomics, stopAtomics,
 }) {
   const busy = isBenchmarking || gpuBenchMode !== 'NONE';
-  const running = isAllocating;
+  const running = isAllocating || atomicsActive;
+  const hasSab = Boolean(telemetry?.hasSharedArrayBuffer);
+  const atomicsThreads = Math.min(telemetry?.cores || 4, 16);
+
+  const applyPreset = (preset) => {
+    setTargetMB(preset.targetMB);
+    setCpuLoad(preset.cpuLoad);
+    setCpuMode(preset.cpuMode);
+    setRamMode(preset.ramMode);
+  };
 
   return (
     <Panel title="RAM & CPU" status={running ? 'active' : 'idle'}>
       {/* headline */}
-      <div className="flex items-end justify-between mb-6">
+      <div className="flex items-end justify-between flex-wrap gap-4 mb-6">
         <div>
-          <div className="label mb-2">Allocated</div>
-          <div className={`metric ${running ? 'on' : ''} text-6xl leading-none`}>
-            {allocatedMB.toLocaleString()} <span style={{ fontSize: '1.1rem', WebkitTextFillColor: '#5E5E78', background: 'none', color: '#5E5E78' }}>MB</span>
-          </div>
-          <div className="flex gap-3 mt-3 text-xs text-fox-3">
-            <span>target: <span className="mono text-fox-2">{targetMB}</span></span>
-            {cpuMode !== 'HASH' && <span>cpu: <span className="mono text-lime">{cpuLoad}%</span></span>}
-          </div>
+          {cpuMode === 'ATOMICS' ? (
+            <>
+              <div className="label mb-2">Atomics Contention</div>
+              <div className={`metric ${atomicsActive ? 'on' : ''} text-6xl leading-none`}>
+                {atomicsMops.toFixed(2)}{' '}
+                <span style={{ fontSize: '1.1rem', WebkitTextFillColor: '#5E5E78', background: 'none', color: '#5E5E78' }}>
+                  M ops/s
+                </span>
+              </div>
+              <div className="flex gap-3 mt-3 text-xs text-fox-3">
+                <span>threads: <span className="font-mono text-fox-2">{atomicsThreads}</span></span>
+                <span>buffer: <span className="font-mono text-fox-2">1024 B SAB</span></span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="label mb-2">Allocated</div>
+              <div className={`metric ${isAllocating ? 'on' : ''} text-6xl leading-none`}>
+                {allocatedMB.toLocaleString()}{' '}
+                <span style={{ fontSize: '1.1rem', WebkitTextFillColor: '#5E5E78', background: 'none', color: '#5E5E78' }}>
+                  MB
+                </span>
+              </div>
+              <div className="flex gap-3 mt-3 text-xs text-fox-3">
+                <span>target: <span className="font-mono text-fox-2">{targetMB}</span></span>
+                {cpuMode !== 'HASH' && (
+                  <span>
+                    cpu: <span className={`font-mono ${ramHolding ? 'text-fox-3' : 'text-lime'}`}>{ramHolding ? 0 : cpuLoad}%</span>
+                    {ramHolding && <span className="ml-1.5 text-amber">(holding RAM)</span>}
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -42,6 +109,37 @@ export default function RamCpuView({
         </ErrorBoundary>
       </div>
 
+      {/* quick stress presets (idle only) */}
+      {!running && !busy && (
+        <div className="mb-6">
+          <div className="label mb-2">Quick presets</div>
+          <div className="flex flex-wrap gap-2">
+            {PRESETS.map((p) => {
+              const active =
+                targetMB === p.targetMB &&
+                cpuLoad === p.cpuLoad &&
+                cpuMode === p.cpuMode &&
+                ramMode === p.ramMode;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-colors ${
+                    active
+                      ? 'bg-lime/15 text-lime border-lime/40'
+                      : 'bg-ink-1/70 text-fox-2 border-line hover:text-fox hover:border-line-strong'
+                  }`}
+                >
+                  <span className="font-semibold">{p.label}</span>
+                  <span className="font-mono text-[10px] opacity-75">{p.meta}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* mode + pattern */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         <div>
@@ -51,14 +149,30 @@ export default function RamCpuView({
             options={[
               { value: 'STANDARD', label: 'Standard' },
               { value: 'HASH', label: 'Hash stress' },
+              {
+                value: 'ATOMICS',
+                label: 'Atomics',
+                disabled: !hasSab,
+                title: hasSab
+                  ? 'SharedArrayBuffer cache-line contention'
+                  : 'Requires SharedArrayBuffer (crossOriginIsolated)',
+              },
               ...(isMobile ? [] : [{ value: 'MINIONS', label: 'Minions' }]),
             ]}
             value={cpuMode}
             onChange={setCpuMode}
-            disabled={isAllocating}
+            disabled={running}
           />
+          {!hasSab && (
+            <p className="text-[11px] text-amber mt-2 flex items-center gap-1.5">
+              <Icons.ShieldAlert size={12} className="shrink-0" />
+              <span>
+                Atomics requires <span className="font-mono">SharedArrayBuffer</span> (cross-origin isolated context).
+              </span>
+            </p>
+          )}
         </div>
-        {cpuMode !== 'MINIONS' && (
+        {cpuMode !== 'MINIONS' && cpuMode !== 'ATOMICS' && (
           <div>
             <div className="label mb-2">Allocation pattern</div>
             <Segmented
@@ -70,28 +184,69 @@ export default function RamCpuView({
               ]}
               value={ramMode}
               onChange={setRamMode}
-              disabled={isAllocating}
+              disabled={running}
             />
           </div>
         )}
       </div>
 
-      {cpuMode !== 'MINIONS' ? (
+      {cpuMode === 'MINIONS' ? (
+        <MinionsSub
+          minionSize={minionSize}
+          minionCount={minionCount}
+          minions={minions}
+          minionWebRTC={minionWebRTC}
+          setMinionSize={setMinionSize}
+          setMinionCount={setMinionCount}
+          setMinionWebRTC={setMinionWebRTC}
+          spawnMinions={spawnMinions}
+          handleKillMinionsConfirm={handleKillMinionsConfirm}
+        />
+      ) : cpuMode === 'ATOMICS' ? (
+        <AtomicsSub
+          hasSab={hasSab}
+          atomicsActive={atomicsActive}
+          atomicsMops={atomicsMops}
+          atomicsThreads={atomicsThreads}
+          busy={busy}
+          startAtomics={startAtomics}
+          stopAtomics={stopAtomics}
+        />
+      ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
-            <Slider label="RAM target" value={targetMB} min={500} max={MAX_LIMIT} step={100} suffix=" MB" onChange={setTargetMB} disabled={busy} />
+            <Slider
+              label="RAM target"
+              value={targetMB}
+              min={256}
+              max={MAX_LIMIT}
+              step={64}
+              suffix=" MB"
+              onChange={setTargetMB}
+              disabled={busy || isAllocating}
+            />
             {cpuMode === 'HASH' ? (
               <div className="space-y-2">
                 <div className="flex justify-between items-baseline">
                   <span className="label">Hash intensity</span>
-                  <span className="mono text-sm text-lime">MAX</span>
+                  <span className="font-mono text-sm text-lime">MAX</span>
                 </div>
                 <div className="w-full h-1.5 rounded-md bg-grad-accent overflow-hidden">
                   <div className="h-full w-full animate-pulse-soft" />
                 </div>
               </div>
             ) : (
-              <Slider label="CPU load" value={cpuLoad} min={0} max={100} step={10} suffix="%" onChange={setCpuLoad} disabled={busy} valueClassName="text-lime" />
+              <Slider
+                label="CPU load"
+                value={cpuLoad}
+                min={0}
+                max={100}
+                step={5}
+                suffix="%"
+                onChange={setCpuLoad}
+                disabled={busy || isAllocating}
+                valueClassName="text-lime"
+              />
             )}
           </div>
 
@@ -105,20 +260,51 @@ export default function RamCpuView({
             </Button>
           )}
         </>
-      ) : (
-        <MinionsSub
-          minionSize={minionSize}
-          minionCount={minionCount}
-          minions={minions}
-          minionWebRTC={minionWebRTC}
-          setMinionSize={setMinionSize}
-          setMinionCount={setMinionCount}
-          setMinionWebRTC={setMinionWebRTC}
-          spawnMinions={spawnMinions}
-          handleKillMinionsConfirm={handleKillMinionsConfirm}
-        />
       )}
     </Panel>
+  );
+}
+
+function AtomicsSub({ hasSab, atomicsActive, atomicsMops, atomicsThreads, busy, startAtomics, stopAtomics }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <div className="rounded-xl p-3 bg-ink-3/60 border border-line">
+          <div className="label mb-1">Workers</div>
+          <div className="font-mono text-xl font-semibold text-fox">{atomicsThreads}</div>
+        </div>
+        <div className="rounded-xl p-3 bg-ink-3/60 border border-line">
+          <div className="label mb-1">Throughput</div>
+          <div className={`font-mono text-xl font-semibold ${atomicsActive ? 'text-lime' : 'text-fox'}`}>
+            {atomicsMops.toFixed(2)} <span className="text-xs text-fox-3">M/s</span>
+          </div>
+        </div>
+        <div className="rounded-xl p-3 bg-ink-3/60 border border-line">
+          <div className="label mb-1">Shared Buffer</div>
+          <div className="font-mono text-xl font-semibold text-fox">1024 B</div>
+        </div>
+        <div className="rounded-xl p-3 bg-ink-3/60 border border-line">
+          <div className="label mb-1">Contention</div>
+          <div className="font-mono text-xl font-semibold text-fox">idx 0, 1</div>
+        </div>
+      </div>
+
+      <p className="text-xs text-fox-3 leading-relaxed mb-6">
+        Spawns {atomicsThreads} Web Workers hammering the same <span className="font-mono text-fox">SharedArrayBuffer</span>{' '}
+        cache lines via <span className="font-mono text-fox">Atomics.add</span> and{' '}
+        <span className="font-mono text-fox">Atomics.compareExchange</span> to saturate cross-core cache coherency traffic.
+      </p>
+
+      {!atomicsActive ? (
+        <Button variant="primary" icon="Zap" onClick={startAtomics} disabled={!hasSab || busy}>
+          Start atomics
+        </Button>
+      ) : (
+        <Button variant="destructive" icon="Square" onClick={stopAtomics}>
+          Stop atomics · {atomicsMops.toFixed(2)} M ops/s
+        </Button>
+      )}
+    </>
   );
 }
 

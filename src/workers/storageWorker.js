@@ -1,85 +1,115 @@
+const TARGET_FILENAME = 'rampage_heavy.bin';
+const CHUNK_MB = 10;
+const CHUNK_SIZE = CHUNK_MB * 1024 * 1024;
+
 let isRunning = false;
 let accessHandle = null;
 let root = null;
 let fileHandle = null;
+let prngState = (Date.now() ^ 0x9e3779b9) >>> 0 || 0x12345678;
+
+const closeAccessHandle = () => {
+  if (accessHandle) {
+    try {
+      accessHandle.close();
+    } catch {
+      /* already closed */
+    }
+    accessHandle = null;
+  }
+};
+
+const fillIncompressibleChunk = (u32) => {
+  // Fast xorshift32 fill over the entire 10 MB buffer so transparent FS
+  // compression (APFS/ZFS/Btrfs/NTFS) cannot compress chunks away.
+  let x = prngState;
+  for (let i = 0; i < u32.length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    u32[i] = x;
+  }
+  prngState = (x >>> 0) || 0x12345678;
+};
 
 self.onmessage = async (e) => {
-  if (e.data === 'START') {
+  const cmd = typeof e.data === 'string' ? e.data : e.data?.type;
+
+  if (cmd === 'START') {
     if (isRunning) return;
     isRunning = true;
 
     try {
-      // 1. Отримуємо доступ до кореневої папки
       root = await navigator.storage.getDirectory();
-      
-      // 2. Створюємо (або відкриваємо) один ВЕЛЕТЕНСЬКИЙ файл
-      fileHandle = await root.getFileHandle('rampage_heavy.bin', { create: true });
-      
-      // 3. Отримуємо синхронний хендл (тільки для Web Workers!)
+      fileHandle = await root.getFileHandle(TARGET_FILENAME, { create: true });
       accessHandle = await fileHandle.createSyncAccessHandle();
+      // Truncate any leftover file from previous runs so reported totals match disk usage.
+      accessHandle.truncate(0);
+      accessHandle.flush();
 
-      // 4. Підготовка буфера (10 MB)
-      const CHUNK_SIZE = 10 * 1024 * 1024;
-      const buffer = new Uint8Array(CHUNK_SIZE).fill(Math.random() * 255);
+      const buffer = new Uint8Array(CHUNK_SIZE);
+      const u32 = new Uint32Array(buffer.buffer);
 
-      // 5. Цикл запису
       let chunks = 0;
+      let offset = 0;
       while (isRunning) {
         try {
-          // Пишемо синхронно (найшвидший спосіб у браузері).
-          // write() без {at} продовжує з поточної позиції — файл росте.
-          accessHandle.write(buffer); 
-          accessHandle.flush(); // Примусово зберігаємо на диск
-          
-          self.postMessage({ type: 'WRITTEN', mb: 10 });
+          fillIncompressibleChunk(u32);
+          accessHandle.write(buffer, { at: offset });
+          accessHandle.flush();
 
-          // Periodically yield to the event loop so STOP/CLEAR messages
-          // can actually reach this worker (a tight sync loop would starve
-          // the message queue and graceful stop would be impossible).
-          if (++chunks % 4 === 0) {
+          offset += CHUNK_SIZE;
+          chunks += 1;
+          self.postMessage({ type: 'PROGRESS', totalMB: chunks * CHUNK_MB, chunks });
+
+          // Yield periodically so STOP/CLEAN/STATUS messages can be processed.
+          if (chunks % 4 === 0) {
             await new Promise((res) => setTimeout(res, 0));
           }
         } catch (err) {
-          // Якщо диск повний (Quota Exceeded)
           self.postMessage({ type: 'ERROR', msg: err.message });
-          isRunning = false; 
-          if (accessHandle) {
-            accessHandle.close();
-            accessHandle = null;
-          }
+          isRunning = false;
+          closeAccessHandle();
         }
       }
     } catch (err) {
       self.postMessage({ type: 'ERROR', msg: err.message });
       isRunning = false;
-      if (accessHandle) {
-        accessHandle.close();
-        accessHandle = null;
-      }
+      closeAccessHandle();
     }
 
-  } else if (e.data === 'STOP') {
-    isRunning = false;
-    if (accessHandle) {
-      accessHandle.close(); // Обов'язково закриваємо хендл
-      accessHandle = null;
+  } else if (cmd === 'STATUS') {
+    try {
+      let bytes = 0;
+      if (accessHandle) {
+        bytes = accessHandle.getSize();
+      } else {
+        if (!root) root = await navigator.storage.getDirectory();
+        const fh = await root.getFileHandle(TARGET_FILENAME);
+        const file = await fh.getFile();
+        bytes = file.size;
+      }
+      const sizeMB = bytes / (1024 * 1024);
+      const chunks = Math.floor(bytes / CHUNK_SIZE);
+      self.postMessage({ type: 'STATUS', sizeMB, chunks });
+    } catch {
+      self.postMessage({ type: 'STATUS', sizeMB: 0, chunks: 0 });
     }
+
+  } else if (cmd === 'STOP') {
+    isRunning = false;
+    closeAccessHandle();
     self.postMessage({ type: 'STOPPED' });
 
-  } else if (e.data === 'CLEAR') {
+  } else if (cmd === 'CLEAN' || cmd === 'CLEAR') {
     isRunning = false;
-    if (accessHandle) {
-      accessHandle.close();
-      accessHandle = null;
-    }
+    closeAccessHandle();
     try {
       if (!root) root = await navigator.storage.getDirectory();
-      // Видаляємо файл
-      await root.removeEntry('rampage_heavy.bin');
-      self.postMessage({ type: 'CLEARED' });
+      await root.removeEntry(TARGET_FILENAME);
     } catch {
-      // Ігноруємо помилку, якщо файлу немає
-      self.postMessage({ type: 'CLEARED' });
+      // Ignore if file does not exist
     }
+    self.postMessage({ type: cmd === 'CLEAR' ? 'CLEARED' : 'CLEANED' });
   }
 };

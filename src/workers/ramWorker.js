@@ -18,27 +18,52 @@ const heavyHash = (str) => {
     return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 };
 
-const burnCpuChunk = (intensity) => {
-  if (intensity <= 0) return;
-  const msToBurn = (intensity / 100) * 80; 
+const burnCpuChunk = (intensity, workerId) => {
+  if (intensity <= 0) return 0;
+  const msToBurn = (intensity / 100) * 80;
   const start = performance.now();
-  
+  let ops = 0;
+
   if (stressMode === 'HASH') {
-      let hashes = 0;
-      while (performance.now() - start < msToBurn) { 
-          heavyHash("block_" + Math.random() + "_" + hashes++);
-      }
-      if (Math.random() > 0.8) {
-          self.postMessage({ type: 'HASH', hash: "0000" + Math.random().toString(16).slice(2) });
-      }
+    let sink = 0;
+    while (performance.now() - start < msToBurn) {
+      sink ^= heavyHash("block_" + Math.random() + "_" + ops++);
+    }
+    self.postMessage({
+      type: 'HASH',
+      hash: "0000" + (sink >>> 0).toString(16).padStart(8, '0') + Math.random().toString(16).slice(2),
+      count: ops,
+      ops,
+      id: workerId,
+    });
   } else {
-      while (performance.now() - start < msToBurn) { Math.sqrt(Math.random() * Math.random()); }
+    let acc = 0;
+    while (performance.now() - start < msToBurn) {
+      for (let k = 0; k < 64; k++) {
+        acc += Math.sqrt(Math.random() * Math.random());
+      }
+      ops += 64;
+    }
+    if (acc < 0) self.postMessage({ type: 'NOOP' });
+  }
+  return ops;
+};
+
+const touchWasmPages = (mem, prevBytes = 0) => {
+  const view = new Uint8Array(mem.buffer);
+  for (let i = prevBytes; i < view.length; i += 4096) {
+    view[i] = 1;
   }
 };
 
 self.onmessage = async (e) => {
   const { action, targetMB, id, cpuLoad, mode, ramMode } = e.data;
-  
+
+  if (action === 'STOP') {
+    isRunning = false;
+    return;
+  }
+
   if (action === 'ALLOCATE') {
     cpuIntensity = cpuLoad || 0;
     stressMode = mode || 'STANDARD';
@@ -64,7 +89,7 @@ self.onmessage = async (e) => {
         if (allocMode === 'CHAOS') {
            const chaosType = Math.random();
            if (chaosType < 0.33) { memoryStore.push(new Float64Array((CHUNK_SIZE * BYTES_PER_MB) / 8).fill(Math.random())); } 
-           else if (chaosType < 0.66) { memoryStore.push("X".repeat((CHUNK_SIZE * BYTES_PER_MB)/2)); } 
+           else if (chaosType < 0.66) { memoryStore.push("\u0100".repeat((CHUNK_SIZE * BYTES_PER_MB) / 2)); } 
            else { memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1)); }
         
         } else if (allocMode === 'WASM') {
@@ -74,9 +99,12 @@ self.onmessage = async (e) => {
                     // Створюємо нову пам'ять (початково 10МБ)
                     currentWasmInstance = new WebAssembly.Memory({ initial: PAGES_PER_CHUNK });
                     memoryStore.push(currentWasmInstance);
+                    touchWasmPages(currentWasmInstance, 0);
                 } else {
                     // Розширюємо існуючу (+10МБ)
+                    const prevBytes = currentWasmInstance.buffer.byteLength;
                     currentWasmInstance.grow(PAGES_PER_CHUNK);
+                    touchWasmPages(currentWasmInstance, prevBytes);
                 }
             } catch {
                 // Якщо одна Wasm пам'ять заповнена (ліміт зазвичай 2GB-4GB), створюємо нову
@@ -84,6 +112,7 @@ self.onmessage = async (e) => {
                 try {
                     currentWasmInstance = new WebAssembly.Memory({ initial: PAGES_PER_CHUNK });
                     memoryStore.push(currentWasmInstance);
+                    touchWasmPages(currentWasmInstance, 0);
                 } catch {
                     throw new Error("Wasm Memory Limit Reached (Global)");
                 }
@@ -94,16 +123,16 @@ self.onmessage = async (e) => {
             memoryStore.push(new Uint8Array(CHUNK_SIZE * BYTES_PER_MB).fill(1));
         }
 
-        if (cpuIntensity > 0) burnCpuChunk(cpuIntensity);
+        const ops = cpuIntensity > 0 ? burnCpuChunk(cpuIntensity, id) : 0;
         
-        self.postMessage({ type: 'PROGRESS', addedMB: CHUNK_SIZE, id });
+        self.postMessage({ type: 'PROGRESS', addedMB: CHUNK_SIZE, ops, id });
         await new Promise(r => setTimeout(r, 20)); 
       }
 
       if (stressMode === 'HASH' && isRunning) {
           self.postMessage({ type: 'HASH_LOOP_ENTER', id }); 
           while (isRunning) {
-              if (cpuIntensity > 0) burnCpuChunk(cpuIntensity);
+              if (cpuIntensity > 0) burnCpuChunk(cpuIntensity, id);
               await new Promise(r => setTimeout(r, 20)); 
           }
       } else {

@@ -8,7 +8,7 @@ function Stat({ label, value, unit, accent }) {
   return (
     <div className="rounded-xl p-4 bg-ink-3/60 border border-line">
       <div className="label mb-1.5">{label}</div>
-      <div className={`mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
+      <div className={`font-mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
         {value} {unit && <span className="text-base text-fox-3">{unit}</span>}
       </div>
     </div>
@@ -36,10 +36,10 @@ export default function IndexedDbView({
 
         {/* chips */}
         <div className="flex flex-wrap gap-2 mb-6">
-          <span className="chip mono">{idbChunk} MB blobs</span>
-          <span className="chip mono">{idbStores} object stores</span>
-          <span className="chip mono">structured-clone on every put</span>
-          <span className="chip mono">
+          <span className="chip font-mono">{idbChunk} MB blobs</span>
+          <span className="chip font-mono">{idbStores} object stores</span>
+          <span className="chip font-mono">structured-clone on every put</span>
+          <span className="chip font-mono">
             {running ? <span className="text-red">quota-grind</span> : 'read-write'}
           </span>
         </div>
@@ -77,11 +77,11 @@ export default function IndexedDbView({
       <div className="glass rounded-xl p-4 flex items-start gap-3">
         <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
         <p className="text-xs text-fox-2 leading-relaxed">
-          Stores <span className="mono text-fox">{idbChunk} MB</span> Blob objects across
-          <span className="mono text-fox"> {idbStores}</span> parallel IndexedDB stores.
-          Each <span className="mono text-fox">put()</span> triggers a structured clone of the blob
+          Stores <span className="font-mono text-fox">{idbChunk} MB</span> Blob objects across
+          <span className="font-mono text-fox"> {idbStores}</span> parallel IndexedDB stores.
+          Each <span className="font-mono text-fox">put()</span> triggers a structured clone of the blob
           payload — distinct from OPFS bypass path — hammering the serialization layer, quota enforcer
-          and transient storage allocator until the browser raises <span className="mono text-fox">QuotaExceededError</span>.
+          and transient storage allocator until the browser raises <span className="font-mono text-fox">QuotaExceededError</span>.
           Stop clears the database (deletes the rampage_idb database). Keep an eye on the browser's site
           data panel: storage quota is reported against the origin, not the device.
         </p>

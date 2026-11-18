@@ -8,7 +8,7 @@ function Stat({ label, value, unit, accent }) {
   return (
     <div className="rounded-xl p-4 bg-ink-3/60 border border-line">
       <div className="label mb-1.5">{label}</div>
-      <div className={`mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
+      <div className={`font-mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
         {value} {unit && <span className="text-base text-fox-3">{unit}</span>}
       </div>
     </div>
@@ -35,10 +35,10 @@ export default function WebRtcView({
 
         {/* topology chip strip */}
         <div className="flex flex-wrap gap-2 mb-6">
-          <span className="chip mono">{rtcPeers} peer-pairs</span>
-          <span className="chip mono">{rtcPeers * 2} RTCPeerConnections</span>
-          <span className="chip mono">loopback ICE</span>
-          <span className="chip mono">
+          <span className="chip font-mono">{rtcPeers} peer-pairs</span>
+          <span className="chip font-mono">{rtcPeers * 2} RTCPeerConnections</span>
+          <span className="chip font-mono">loopback ICE</span>
+          <span className="chip font-mono">
             {rtcMedia ? <span className="text-lime">media + data</span> : 'data only'}
           </span>
         </div>
@@ -46,7 +46,7 @@ export default function WebRtcView({
         {/* controls */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-7">
           <Slider label="Peer pairs" value={rtcPeers} min={1} max={40} step={1} onChange={setRtcPeers} disabled={running} />
-          <Slider label="Payload size" value={rtcPayload} min={1} max={256} step={1} suffix=" KB" onChange={setRtcPayload} disabled={running} />
+          <Slider label="Payload size" value={Math.min(rtcPayload, 64)} min={1} max={64} step={1} suffix=" KB" onChange={setRtcPayload} disabled={running} />
           <Slider label="Send interval" value={rtcInterval} min={1} max={50} step={1} suffix=" ms" onChange={setRtcInterval} disabled={running} />
         </div>
 
@@ -87,9 +87,9 @@ export default function WebRtcView({
       >
         <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
         <p className="text-xs text-fox-2 leading-relaxed">
-          Spawns <span className="mono text-fox">N×2</span> RTCPeerConnections connected via local ICE loopback.
-          Each pair runs a DataChannel pushing <span className="mono text-fox">{rtcPayload} KB</span> junk every{' '}
-          <span className="mono text-fox">{rtcInterval} ms</span>. Enabling media additionally forces
+          Spawns <span className="font-mono text-fox">N×2</span> RTCPeerConnections connected via local ICE loopback.
+          Each pair runs a DataChannel pushing <span className="font-mono text-fox">{Math.min(rtcPayload, 64)} KB</span> junk every{' '}
+          <span className="font-mono text-fox">{rtcInterval} ms</span>. Enabling media additionally forces
           simultaneous video encode/decode across every sender. Burns CPU (DTLS/SRTP), memory (buffers), and
           network stack simultaneously — distinct from the basic Network worker.
         </p>

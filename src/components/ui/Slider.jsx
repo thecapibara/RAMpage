@@ -2,7 +2,6 @@ import React, { useId } from 'react';
 
 export default function Slider({ label, value, min, max, step = 1, onChange, disabled, suffix = '', valueClassName = 'text-fox', displayValue = null }) {
   const id = useId();
-  const pct = ((Number(value) - Number(min)) / (Number(max) - Number(min))) * 100;
   // displayValue overrides the shown value for non-linear sliders (e.g. the
   // GPU resolution slider whose value is a log2 index but should read "2K").
   const shown = displayValue != null ? displayValue : `${value}${suffix}`;
@@ -21,7 +20,6 @@ export default function Slider({ label, value, min, max, step = 1, onChange, dis
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ '--p': `${pct}%` }}
         className="range disabled:opacity-40"
       />
     </div>

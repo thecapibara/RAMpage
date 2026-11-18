@@ -2,8 +2,6 @@
 // Registered at scope '/sw-hammer/'. Intercepts fetches under that scope and
 // transforms each request into a heavy compute task that runs in the SW background.
 
-const CACHE_NAME = 'rampage-sw-hammer';
-
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
@@ -21,8 +19,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith((async () => {
     const params = new URLSearchParams(url.search);
     const mode = params.get('mode') || 'fib';
-    const work = parseInt(params.get('work') || '200000', 10);
-    const blobBytes = parseInt(params.get('sz') || '65536', 10);
+    const rawWork = parseInt(params.get('work') || '200000', 10);
+    const work = Math.max(1, Number.isFinite(rawWork) ? rawWork : 200000);
+    const rawBlobBytes = parseInt(params.get('sz') || '65536', 10);
+    const blobBytes = Math.max(0, Number.isFinite(rawBlobBytes) ? rawBlobBytes : 65536);
 
     let cpuMs = 0;
     const t0 = performance.now();
@@ -49,19 +49,29 @@ self.addEventListener('fetch', (event) => {
       }
     } else if (mode === 'blob') {
       // Allocate and XOR a large buffer repeatedly
-      const buf = new Uint8Array(blobBytes);
+      const buf = new Uint8Array(Math.max(1, blobBytes));
       for (let i = 0; i < work; i++) {
         buf.fill((Math.random() * 256) | 0);
         out ^= buf[buf.length - 1];
       }
     } else if (mode === 'json') {
-      // Build + stringify giant nested JSON (allocation churn)
-      let s = '';
-      for (let i = 0; i < work; i++) {
-        const obj = { i, s: 'x'.repeat(blobBytes), a: [1, 2, 3, 4, 5] };
-        s += JSON.stringify(obj);
-        if (s.length > 1024 * 1024) s = s.slice(-1024);
-        out ^= i;
+      // Serialize + parse a bounded JSON payload to stress SW CPU & GC safely without OOM
+      const payloadSize = Math.min(Math.max(64, blobBytes), 8192);
+      const iterations = Math.min(Math.max(1, Math.floor(work / 1000)), 500);
+      const payload = {
+        mode: 'json',
+        ts: Date.now(),
+        pad: 'x'.repeat(payloadSize),
+        items: Array.from({ length: 32 }, (_, idx) => ({
+          id: idx,
+          v: (idx * 31337) | 0,
+          ok: (idx & 1) === 0,
+        })),
+      };
+      for (let i = 0; i < iterations; i++) {
+        payload.iter = i;
+        const parsed = JSON.parse(JSON.stringify(payload));
+        out ^= parsed.items[i % parsed.items.length].v ^ parsed.pad.length;
       }
     }
 
@@ -70,7 +80,7 @@ self.addEventListener('fetch', (event) => {
     // Build a synthetic response. The body's size is configurable so the network
     // stack also churns transferring bytes back to the main thread.
     const body = new Uint8Array(blobBytes);
-    for (let i = 0; i < body.length; i += 4096) body.fill((Math.random()*256)|0, i, Math.min(i+4096, body.length));
+    for (let i = 0; i < body.length; i += 4096) body.fill((Math.random() * 256) | 0, i, Math.min(i + 4096, body.length));
 
     const headers = {
       'Content-Type': 'application/octet-stream',

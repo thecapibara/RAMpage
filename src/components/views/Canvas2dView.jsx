@@ -8,7 +8,7 @@ function Stat({ label, value, unit, accent }) {
   return (
     <div className="rounded-xl p-4 bg-ink-3/60 border border-line">
       <div className="label mb-1.5">{label}</div>
-      <div className={`mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
+      <div className={`font-mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
         {value} {unit && <span className="text-base text-fox-3">{unit}</span>}
       </div>
     </div>
@@ -46,11 +46,11 @@ export default function Canvas2dView({
 
         {/* chips */}
         <div className="flex flex-wrap gap-2 mb-6">
-          <span className="chip mono">{c2dRes}×{(c2dRes*9/16|0)}</span>
-          <span className="chip mono">{c2dMode}</span>
-          <span className="chip mono">{c2dPasses} passes/frame</span>
-          <span className="chip mono">putImageData</span>
-          {running && <span className="chip mono text-lime">raster busy</span>}
+          <span className="chip font-mono">{c2dRes}×{(c2dRes*9/16|0)}</span>
+          <span className="chip font-mono">{c2dMode}</span>
+          <span className="chip font-mono">{c2dPasses} passes/frame</span>
+          <span className="chip font-mono">putImageData</span>
+          {running && <span className="chip font-mono text-lime">raster busy</span>}
         </div>
 
         {/* mode pick */}
@@ -125,10 +125,10 @@ export default function Canvas2dView({
       <div className="glass rounded-xl p-4 flex items-start gap-3">
         <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
         <p className="text-xs text-fox-2 leading-relaxed">
-          Spawns a hidden <span className="mono text-fox">{c2dRes}×{(c2dRes*9/16)|0}</span>
+          Spawns a hidden <span className="font-mono text-fox">{c2dRes}×{(c2dRes*9/16)|0}</span>
           {' '}2D canvas and burns it in a tight loop with{' '}
-          <span className="mono text-fox">getImageData</span> / per-pixel mutation /{' '}
-          <span className="mono text-fox">putImageData</span>{' '}{c2dPasses}× per frame.
+          <span className="font-mono text-fox">getImageData</span> / per-pixel mutation /{' '}
+          <span className="font-mono text-fox">putImageData</span>{' '}{c2dPasses}× per frame.
           Unlike the GPU view, this hammers the browser's 2D rasterizer path (CPU + memory bus),
           which on most browsers is a separate software pipeline from WebGL compute.
           Works in any browser with Canvas2D support, no special permissions required.

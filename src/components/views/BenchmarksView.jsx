@@ -28,7 +28,7 @@ export default function BenchmarksView({
               onChange={setBenchType}
               disabled={isBenchmarking || gpuBusy}
             />
-            <span className="chip mono">survival suite</span>
+            <span className="chip font-mono">survival suite</span>
           </div>
 
           {benchType === 'CPU' ? (
@@ -36,7 +36,7 @@ export default function BenchmarksView({
               <div className="label mb-2">High score</div>
               <div className="metric on text-5xl leading-none mb-3">{cpuHighScore.toLocaleString()}</div>
               {isBenchmarking && (
-                <div className="mono text-sm text-fox mt-2 mb-6">current: {cpuBenchScore.toLocaleString()}</div>
+                <div className="font-mono text-sm text-fox mt-2 mb-6">current: {cpuBenchScore.toLocaleString()}</div>
               )}
               {!isBenchmarking ? (
                 <Button variant="primary" icon="Play" onClick={startCpuBenchmark} disabled={gpuBusy}>Run survival</Button>
@@ -57,7 +57,7 @@ export default function BenchmarksView({
                     className="flex justify-between items-center py-2.5 border-b border-line last:border-0"
                   >
                     <span className="label">{row.label}</span>
-                    <span className="mono text-xl font-semibold text-fox">{row.score.toLocaleString()}</span>
+                    <span className="font-mono text-xl font-semibold text-fox">{row.score.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -75,19 +75,19 @@ export default function BenchmarksView({
         <div className="space-y-1">
           <div className="flex justify-between items-center py-3 border-b border-line">
             <span className="label">CPU / RAM</span>
-            <span className="mono text-xl font-bold grad-text">{(cpuHighScore || 0).toLocaleString()}</span>
+            <span className="font-mono text-xl font-bold grad-text">{(cpuHighScore || 0).toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center py-3 border-b border-line">
             <span className="label">GPU light</span>
-            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.LIGHT || 0).toLocaleString()}</span>
+            <span className="font-mono text-lg font-semibold text-fox">{(gpuHighScores.LIGHT || 0).toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center py-3 border-b border-line">
             <span className="label">GPU normal</span>
-            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.NORMAL || 0).toLocaleString()}</span>
+            <span className="font-mono text-lg font-semibold text-fox">{(gpuHighScores.NORMAL || 0).toLocaleString()}</span>
           </div>
           <div className="flex justify-between items-center py-3">
             <span className="label">GPU burner</span>
-            <span className="mono text-lg font-semibold text-fox">{(gpuHighScores.BURNER || 0).toLocaleString()}</span>
+            <span className="font-mono text-lg font-semibold text-fox">{(gpuHighScores.BURNER || 0).toLocaleString()}</span>
           </div>
         </div>
       </Panel>

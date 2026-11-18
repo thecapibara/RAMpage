@@ -7,7 +7,8 @@ export default function Segmented({ options, value, onChange, disabled, classNam
         <button
           key={opt.value}
           type="button"
-          disabled={disabled}
+          disabled={disabled || opt.disabled}
+          title={opt.title}
           onClick={() => onChange(opt.value)}
           className={`flex-1 min-w-max px-3 py-1.5 text-xs font-semibold rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             value === opt.value

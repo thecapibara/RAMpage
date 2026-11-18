@@ -8,7 +8,7 @@ function Stat({ label, value, unit, accent }) {
   return (
     <div className="rounded-xl p-4 bg-ink-3/60 border border-line">
       <div className="label mb-1.5">{label}</div>
-      <div className={`mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
+      <div className={`font-mono text-3xl font-semibold leading-none ${accent ? 'text-lime' : 'text-fox'}`}>
         {value} {unit && <span className="text-base text-fox-3">{unit}</span>}
       </div>
     </div>
@@ -36,11 +36,11 @@ export default function AudioView({
 
         {/* chips */}
         <div className="flex flex-wrap gap-2 mb-6">
-          <span className="chip mono">{audioVoices} concurrent contexts</span>
-          <span className="chip mono">{audioLength.toFixed(1)} s render length</span>
-          <span className="chip mono">{audioMode}</span>
-          <span className="chip mono">OfflineAudioContext</span>
-          {running && <span className="chip mono text-lime">DSP busy</span>}
+          <span className="chip font-mono">{audioVoices} concurrent contexts</span>
+          <span className="chip font-mono">{audioLength.toFixed(1)} s render length</span>
+          <span className="chip font-mono">{audioMode}</span>
+          <span className="chip font-mono">OfflineAudioContext</span>
+          {running && <span className="chip font-mono text-lime">DSP busy</span>}
         </div>
 
         {/* mode pick */}
@@ -93,14 +93,14 @@ export default function AudioView({
         <Icons.ShieldAlert size={16} className="text-amber shrink-0 mt-0.5" />
         <div className="text-xs text-fox-2 leading-relaxed space-y-1">
           <p>
-            Spawns <span className="mono text-fox">{audioVoices}</span> parallel
-            <span className="mono text-fox"> OfflineAudioContext</span> render jobs, each
-            producing a <span className="mono text-fox">{audioLength.toFixed(1)}s</span> buffer.
+            Spawns <span className="font-mono text-fox">{audioVoices}</span> parallel
+            <span className="font-mono text-fox"> OfflineAudioContext</span> render jobs, each
+            producing a <span className="font-mono text-fox">{audioLength.toFixed(1)}s</span> buffer.
             Browsers dispatch this work to the internal audio/render thread — distinct from the main
             thread and ordinary Web Workers. Modes exercise the ConvolverNode FFT path, OscillatorNode
             bank, WaveShaperNode make-tables, or all stacked at once.
           </p>
-          <p className="mono text-[10px] text-fox-3">
+          <p className="font-mono text-[10px] text-fox-3">
             Compatible across Chromium, Gecko, and WebKit. Offline contexts produce no sound and need no
             user gesture.
           </p>

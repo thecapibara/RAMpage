@@ -32,7 +32,7 @@ export default function LogsPanel({ logs }) {
           <Icons.Terminal size={13} className="text-fox-3" />
           <span className="label">event log</span>
           {logs.length > 0 && (
-            <span className="mono text-[10px] text-fox-3">{logs.length} {logs.length === 1 ? 'entry' : 'entries'}</span>
+            <span className="font-mono text-[10px] text-fox-3">{logs.length} {logs.length === 1 ? 'entry' : 'entries'}</span>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -59,7 +59,7 @@ export default function LogsPanel({ logs }) {
 
       {/* body */}
       {open && (
-        <div className="selectable px-4 py-3 max-h-56 overflow-y-auto mono text-[11px] leading-relaxed">
+        <div className="selectable px-4 py-3 max-h-56 overflow-y-auto font-mono text-[11px] leading-relaxed">
           {logs.length === 0 ? (
             <div className="text-fox-3 flex items-center gap-2">
               <span className="text-fox-3">&gt;</span> system ready…
@@ -68,7 +68,7 @@ export default function LogsPanel({ logs }) {
             logs.map((l, i) => {
               const s = String(l.text ?? l);
               const isError = l.type === 'error' || s.includes('Error');
-              const isWarn = l.type === 'warn' || s.includes('warning') || s.includes('Warning');
+              const isWarn = l.type === 'warn' || l.type === 'warning' || s.includes('warning') || s.includes('Warning');
               const isHash = s.includes('⛏️');
               const isOk = l.type === 'success' || s.includes('success') || s.includes('Complete') || isHash;
               const cls = isError ? 'text-red' : isOk ? 'text-lime' : isWarn ? 'text-amber' : 'text-fox-2';
@@ -85,7 +85,7 @@ export default function LogsPanel({ logs }) {
         </div>
       )}
       {!open && last && (
-        <div className="px-4 py-2.5 mono text-xs text-fox-2 truncate">
+        <div className="px-4 py-2.5 font-mono text-xs text-fox-2 truncate">
           <span className="text-fox-3">&gt;</span> {last.time} {last.text}
         </div>
       )}
